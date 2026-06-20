@@ -1,4 +1,4 @@
-import { Block, Bold, Br, Link, List, ListItem, Location, Span, Title } from '../../lib/markdown';
+import { Block, Bold, Br, Code, Link, List, ListItem, Location, Span, Title } from '../../lib/markdown';
 import type { Skill } from '../../services/skill';
 import { tokenCounter } from '../../services/token-counter';
 import type { UserMemory } from '../../types/memory';
@@ -12,11 +12,18 @@ type Connection = {
 	database: string;
 };
 
+type CustomChart = {
+	type: string;
+	name: string;
+	description: string;
+};
+
 type SystemPromptProps = {
 	memories?: UserMemory[];
 	userRules?: string;
 	connections?: Connection[];
 	skills?: Skill[];
+	customCharts?: CustomChart[];
 	timezone?: string;
 	testMode?: boolean;
 };
@@ -28,6 +35,7 @@ export function SystemPrompt({
 	userRules,
 	connections = [],
 	skills = [],
+	customCharts = [],
 	timezone,
 	testMode,
 }: SystemPromptProps) {
@@ -101,6 +109,23 @@ export function SystemPrompt({
 					desired (similar to "line"). Use "stacked_area" to show how multiple series compose a total over
 					time (e.g. revenue by payment method, users by plan) — requires 2+ series and pivoted data.
 				</ListItem>
+				{customCharts.length > 0 && (
+					<ListItem>
+						This project defines <Bold>custom chart plugins</Bold>. To use one, pass its name as the
+						display_chart <Bold>chart_type</Bold> (along with query_id, x_axis_key and series, just like a
+						built-in chart). Only use a custom chart when the user asks for it or it clearly fits better
+						than a built-in type. Available custom charts:
+						<List>
+							{customCharts.map((chart) => (
+								<ListItem key={chart.type}>
+									<Code>{chart.type}</Code>
+									{chart.name && chart.name !== chart.type ? ` (${chart.name})` : ''}
+									{chart.description ? `: ${chart.description}` : ''}
+								</ListItem>
+							))}
+						</List>
+					</ListItem>
+				)}
 				{hasClickHouse && (
 					<ListItem>
 						When available, use indexes.md to see how the table is ordered and indexed (ORDER BY, PRIMARY

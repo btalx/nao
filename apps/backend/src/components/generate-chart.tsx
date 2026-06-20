@@ -1,4 +1,4 @@
-import { buildChart, defaultColorFor, labelize } from '@nao/shared';
+import { buildChart, defaultColorFor, isBuiltinChartType, labelize } from '@nao/shared';
 import type { DateFormatSettings } from '@nao/shared/date';
 import type { displayChart } from '@nao/shared/tools';
 import React from 'react';
@@ -23,6 +23,13 @@ export function generateChartImage(input: RenderChartInput): Buffer {
 
 export function renderChartToSvg(input: RenderChartInput): string {
 	const { config, data, dateFormat } = input;
+
+	// Custom chart plugins render in the browser (vanilla JS / Recharts) and have
+	// no server-side SVG path, so PNG export is unavailable for them.
+	if (!isBuiltinChartType(config.chart_type)) {
+		throw new Error(`Server-side image generation is not supported for custom chart type "${config.chart_type}".`);
+	}
+
 	const width = input.width ?? 800;
 	const height = input.height ?? 500;
 	const margin = input.margin ?? { top: 10, right: 20, bottom: 5, left: 0 };
@@ -38,7 +45,7 @@ export function renderChartToSvg(input: RenderChartInput): string {
 
 	const chart = buildChart({
 		data,
-		chartType: config.chart_type,
+		chartType: config.chart_type as displayChart.ChartType,
 		xAxisKey: config.x_axis_key,
 		xAxisType: config.x_axis_type === 'number' ? 'number' : 'category',
 		series: config.series,

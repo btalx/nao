@@ -65,6 +65,7 @@ import {
 import { logger } from '../utils/logger';
 import { addPromptCache } from '../utils/prompt-cache';
 import { truncateMiddle } from '../utils/utils';
+import { chartPluginService } from './chart-plugin.service';
 import { compactionService } from './compaction';
 import { hasFeature, LICENSE_FEATURES } from './license.service';
 import { memoryService } from './memory';
@@ -514,8 +515,21 @@ class AgentManager {
 		const userRules = getUserRules(this._toolContext.projectFolder);
 		const connections = getConnections(this._toolContext.projectFolder);
 		const skills = skillService.getSkills();
+		const customCharts = chartPluginService.getPlugins().map(({ type, name, description }) => ({
+			type,
+			name,
+			description,
+		}));
 		const basePrompt = renderToMarkdown(
-			SystemPrompt({ memories, userRules, connections, skills, timezone, testMode: this.chat.testMode }),
+			SystemPrompt({
+				memories,
+				userRules,
+				connections,
+				skills,
+				customCharts,
+				timezone,
+				testMode: this.chat.testMode,
+			}),
 		);
 		const renderedPrompt = provider
 			? renderToMarkdown(MessagingProviderSystemPrompt({ basePrompt, provider, chatUrl }))

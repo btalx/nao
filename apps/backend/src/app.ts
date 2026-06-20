@@ -26,6 +26,7 @@ import { authRoutes } from './routes/auth';
 import { authErrorRedirectRoutes } from './routes/auth-error-redirect';
 import { brandingRoutes } from './routes/branding';
 import { chartRoutes } from './routes/chart';
+import { chartPluginRoutes } from './routes/chart-plugins';
 import { deployRoutes } from './routes/deploy';
 import { embedStoryDownloadRoutes } from './routes/embed-story-download';
 import { githubRoutes } from './routes/github';
@@ -154,6 +155,10 @@ app.register(testRoutes, {
 
 app.register(chartRoutes, {
 	prefix: '/c',
+});
+
+app.register(chartPluginRoutes, {
+	prefix: '/api/charts',
 });
 
 app.register(imageRoutes, {

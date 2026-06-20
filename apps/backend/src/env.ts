@@ -82,6 +82,12 @@ const envSchema = z.object({
 
 	NAO_DEFAULT_PROJECT_PATH: z.string().optional(),
 	NAO_MODE: z.enum(['self-hosted', 'cloud']).default('self-hosted'),
+	/**
+	 * Hot reload of custom chart plugins (`agent/charts/`). Enabled by default
+	 * for local single-project setups (i.e. `nao chat`); not needed for Docker
+	 * deployments where the project folder is static. Set to "false" to disable.
+	 */
+	NAO_CHART_HOT_RELOAD: z.enum(['true', 'false']).optional(),
 	NAO_PROJECTS_DIR: z.string().default('./projects'),
 	NAO_CORE_VERSION: z.string().optional(),
 
@@ -149,6 +155,16 @@ export function __reloadEnvForTesting(): void {
 
 export const isCloud = env.NAO_MODE === 'cloud';
 export const isSelfHosted = env.NAO_MODE === 'self-hosted';
+
+/**
+ * Whether to watch `agent/charts/` and push hot-reload events to the UI.
+ * Honors an explicit `NAO_CHART_HOT_RELOAD` flag; otherwise defaults on for
+ * local single-project (self-hosted with a default project path) setups.
+ */
+export const chartHotReloadEnabled =
+	env.NAO_CHART_HOT_RELOAD !== undefined
+		? env.NAO_CHART_HOT_RELOAD === 'true'
+		: isSelfHosted && Boolean(env.NAO_DEFAULT_PROJECT_PATH);
 
 const normalizedBaseUrl = env.BETTER_AUTH_URL.replace(/\/+$/, '');
 export const MCP_SERVER_URL = `${normalizedBaseUrl}/mcp`;
