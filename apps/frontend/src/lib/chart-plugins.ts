@@ -70,6 +70,8 @@ export function useChartPluginVersion(): number {
 	return useSyncExternalStore(
 		(listener) => {
 			listeners.add(listener);
+			// Fetching the manifest opens the hot-reload event stream (when enabled).
+			void getChartPluginManifest();
 			return () => listeners.delete(listener);
 		},
 		() => version,
