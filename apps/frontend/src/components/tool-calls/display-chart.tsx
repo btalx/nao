@@ -1,5 +1,5 @@
 import { memo, useCallback, useMemo, useState } from 'react';
-import { buildChart, buildStoryChartBlock, labelize } from '@nao/shared';
+import { buildChart, buildStoryChartBlock, isBuiltinChartType, labelize } from '@nao/shared';
 import { Code, Download, FilePlus, Pencil } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useOptionalAgentContext } from '../../contexts/agent.provider';
@@ -11,6 +11,7 @@ import { Button } from '../ui/button';
 import { ToolCallWrapper } from './tool-call-wrapper';
 import { ChartRangeSelector } from './display-chart-range-selector';
 import { DisplayChartEditDialog } from './display-chart-edit-dialog';
+import { CustomChart } from './custom-chart';
 import type { ToolCallComponentProps } from '.';
 import type { ChartConfig } from '../ui/chart';
 import type { displayChart, executeSql } from '@nao/shared/tools';
@@ -234,7 +235,7 @@ export const DisplayChartToolCall = ({
 							<Code className='size-4' />
 						</Button>
 					)}
-					{config.chart_type != 'kpi_card' && (
+					{config.chart_type != 'kpi_card' && isBuiltinChartType(config.chart_type) && (
 						<Button
 							variant='ghost'
 							size='icon-xs'
@@ -246,7 +247,7 @@ export const DisplayChartToolCall = ({
 							<Download className='size-4' />
 						</Button>
 					)}
-					{isEditable && (
+					{isEditable && isBuiltinChartType(config.chart_type) && (
 						<Button
 							variant='ghost'
 							size='icon-xs'
@@ -284,7 +285,7 @@ export const DisplayChartToolCall = ({
 
 export interface ChartDisplayProps {
 	data: Record<string, unknown>[];
-	chartType: displayChart.ChartType;
+	chartType: string;
 	xAxisKey: string;
 	xAxisType: 'number' | 'category';
 	xAxisLabelFormatter?: (value: string) => string;
@@ -305,6 +306,7 @@ export const ChartDisplay = memo(function ChartDisplay({
 }: ChartDisplayProps) {
 	const { visibleSeries, hiddenSeriesKeys, handleToggleSeriesVisibility } = useSeriesVisibility(series);
 	const dateFormat = useDateFormat();
+	const isCustom = !isBuiltinChartType(chartType);
 
 	const chartConfig = useMemo((): ChartConfig => {
 		if (chartType === 'pie') {
@@ -360,35 +362,40 @@ export const ChartDisplay = memo(function ChartDisplay({
 
 	const chartElement = useMemo(
 		() =>
-			buildChart({
-				data,
-				chartType,
-				xAxisKey,
-				xAxisType,
-				series: visibleSeries,
-				colorFor,
-				labelFormatter,
-				showGrid,
-				margin: { top: 0, right: 0, bottom: 0, left: 0 },
-				children: [
-					<ChartTooltip
-						key='tooltip'
-						animationDuration={150}
-						animationEasing='linear'
-						allowEscapeViewBox={{ y: true, x: false }}
-						content={<ChartTooltipContent labelFormatter={(value) => labelize(value, dateFormat)} />}
-					/>,
-					chartType !== 'pie' && (
-						<ChartLegend
-							key='legend'
-							payload={legendPayload}
-							content={<ChartLegendContent onItemClick={handleToggleSeriesVisibility} />}
-						/>
-					),
-				],
-				title,
-			}),
+			isCustom
+				? null
+				: buildChart({
+						data,
+						chartType: chartType as displayChart.ChartType,
+						xAxisKey,
+						xAxisType,
+						series: visibleSeries,
+						colorFor,
+						labelFormatter,
+						showGrid,
+						margin: { top: 0, right: 0, bottom: 0, left: 0 },
+						children: [
+							<ChartTooltip
+								key='tooltip'
+								animationDuration={150}
+								animationEasing='linear'
+								allowEscapeViewBox={{ y: true, x: false }}
+								content={
+									<ChartTooltipContent labelFormatter={(value) => labelize(value, dateFormat)} />
+								}
+							/>,
+							chartType !== 'pie' && (
+								<ChartLegend
+									key='legend'
+									payload={legendPayload}
+									content={<ChartLegendContent onItemClick={handleToggleSeriesVisibility} />}
+								/>
+							),
+						],
+						title,
+					}),
 		[
+			isCustom,
 			data,
 			chartType,
 			xAxisKey,
@@ -404,13 +411,21 @@ export const ChartDisplay = memo(function ChartDisplay({
 		],
 	);
 
+	if (isCustom) {
+		return (
+			<div className='flex flex-col items-center gap-2 w-full h-full'>
+				<CustomChart type={chartType} data={data} config={{ chartType, xAxisKey, xAxisType, series, title }} />
+			</div>
+		);
+	}
+
 	return (
 		<div className='flex flex-col items-center gap-2 w-full'>
 			{chartType === 'kpi_card' ? (
 				chartElement
 			) : (
 				<ChartContainer config={chartConfig} className='w-full'>
-					{chartElement}
+					{chartElement!}
 				</ChartContainer>
 			)}
 		</div>
