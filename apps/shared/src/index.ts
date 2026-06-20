@@ -1,10 +1,12 @@
 export * from './chart-block';
 export * from './chart-builder';
+export * from './chart-plugin';
 export * from './citation';
 export * from './date';
 export * from './mcp';
 export * from './mcp-embed';
 export * from './mentions';
 export * from './pluralize';
+export { BUILTIN_CHART_TYPES, isBuiltinChartType } from './tools/display-chart';
 export * from './types';
 export * from './utils';

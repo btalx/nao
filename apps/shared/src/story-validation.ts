@@ -10,18 +10,6 @@ export interface StoryValidationError {
 const REQUIRED_CHART_ATTRS = ['query_id', 'chart_type', 'x_axis_key'] as const;
 const REQUIRED_TABLE_ATTRS = ['query_id'] as const;
 
-const VALID_CHART_TYPES = new Set([
-	'bar',
-	'stacked_bar',
-	'line',
-	'area',
-	'stacked_area',
-	'pie',
-	'kpi_card',
-	'scatter',
-	'radar',
-]);
-
 const VALID_X_AXIS_TYPES = new Set(['date', 'number', 'category']);
 
 /**
@@ -71,14 +59,9 @@ function validateChartBlocks(code: string): StoryValidationError[] {
 			});
 		}
 
-		if (attrs.chart_type && !VALID_CHART_TYPES.has(attrs.chart_type)) {
-			errors.push({
-				message: `Invalid chart_type "${attrs.chart_type}". Valid types: ${[...VALID_CHART_TYPES].join(', ')}.`,
-				line: position.line,
-				column: position.column,
-				length: fullMatch.length,
-			});
-		}
+		// `chart_type` is intentionally not validated against a fixed list:
+		// besides the built-in types, projects can define custom chart plugins
+		// in `agent/charts/`, whose names are only known at runtime.
 
 		if (attrs.x_axis_type && !VALID_X_AXIS_TYPES.has(attrs.x_axis_type)) {
 			errors.push({

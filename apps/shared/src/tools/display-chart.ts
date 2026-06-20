@@ -12,6 +12,20 @@ export const ChartTypeEnum = z.enum([
 	'radar',
 ]);
 
+/** The chart types that nao renders natively with Recharts. */
+export const BUILTIN_CHART_TYPES = ChartTypeEnum.options as readonly ChartType[];
+
+/**
+ * True when `chartType` is one of the natively supported chart types.
+ *
+ * Any other string is treated as a custom chart plugin defined in the project's
+ * `agent/charts/` folder and rendered on the client by dynamically importing the
+ * matching plugin module.
+ */
+export function isBuiltinChartType(chartType: string): chartType is ChartType {
+	return (BUILTIN_CHART_TYPES as readonly string[]).includes(chartType);
+}
+
 export const XAxisTypeEnum = z.enum(['date', 'number', 'category']);
 
 export const SeriesConfigSchema = z.object({
@@ -22,7 +36,12 @@ export const SeriesConfigSchema = z.object({
 
 export const InputSchema = z.object({
 	query_id: z.string().describe("The id of a previous `execute_sql` tool call's output to get data from."),
-	chart_type: ChartTypeEnum.describe('Type of chart to display.'),
+	chart_type: z
+		.string()
+		.describe(
+			`Type of chart to display. Built-in types: ${BUILTIN_CHART_TYPES.join(', ')}. ` +
+				'You may also pass the name of a custom chart plugin defined in the project (see the "Custom charts" section of your instructions, if present).',
+		),
 	x_axis_key: z.string().describe('Column name for X-axis/category labels.'),
 	x_axis_type: XAxisTypeEnum.nullable().describe(
 		'Use "date" only when x-axis values parse as JS Date (YYYY-MM-DD). Use "category" for quarter_ending, fiscal periods, or labels. Use "number" for numeric x-axis.',
