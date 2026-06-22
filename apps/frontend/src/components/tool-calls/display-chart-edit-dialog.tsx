@@ -8,9 +8,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import type { UIMessage, UIToolPart } from '@nao/backend/chat';
 import { useAgentContext } from '@/contexts/agent.provider';
+import { useChartPluginManifest } from '@/lib/chart-plugins';
 import { trpc } from '@/main';
 
-const CHART_TYPE_OPTIONS: { value: displayChart.ChartType; label: string }[] = [
+const CHART_TYPE_OPTIONS: { value: string; label: string }[] = [
 	{ value: 'bar', label: 'Bar' },
 	{ value: 'stacked_bar', label: 'Stacked bar' },
 	{ value: 'line', label: 'Line' },
@@ -51,6 +52,7 @@ export function ChartConfigEditDialog({
 }: ChartConfigEditDialogProps) {
 	const [draft, setDraft] = useState<displayChart.Input>(config);
 	const [error, setError] = useState<string | null>(null);
+	const { data: pluginManifest } = useChartPluginManifest();
 
 	useEffect(() => {
 		if (open) {
@@ -58,6 +60,19 @@ export function ChartConfigEditDialog({
 			setError(null);
 		}
 	}, [open, config]);
+
+	const chartTypeOptions = useMemo(() => {
+		const custom = (pluginManifest?.plugins ?? []).map((plugin) => ({
+			value: plugin.type,
+			label: plugin.name || plugin.type,
+		}));
+		const options = [...CHART_TYPE_OPTIONS, ...custom];
+		// Keep the current type selectable even if its plugin is no longer listed.
+		if (draft.chart_type && !options.some((option) => option.value === draft.chart_type)) {
+			options.push({ value: draft.chart_type, label: draft.chart_type });
+		}
+		return options;
+	}, [pluginManifest, draft.chart_type]);
 
 	const xAxisOptions = useMemo(() => {
 		if (availableColumns.length === 0) {
@@ -141,15 +156,13 @@ export function ChartConfigEditDialog({
 							<span className='text-sm font-semibold text-foreground'>Chart type</span>
 							<Select
 								value={draft.chart_type}
-								onValueChange={(value) =>
-									setDraft((prev) => ({ ...prev, chart_type: value as displayChart.ChartType }))
-								}
+								onValueChange={(value) => setDraft((prev) => ({ ...prev, chart_type: value }))}
 							>
 								<SelectTrigger className='w-full bg-panel [&_svg]:text-foreground! [&_svg]:opacity-100!'>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent className='border-none bg-panel [&_svg]:text-foreground! [&_svg]:opacity-100!'>
-									{CHART_TYPE_OPTIONS.map((option) => (
+									{chartTypeOptions.map((option) => (
 										<SelectItem key={option.value} value={option.value}>
 											{option.label}
 										</SelectItem>

@@ -6,7 +6,7 @@ import type { LlmSelectedModel } from '@nao/shared/types';
 import { InferUIMessageChunk, readUIMessageStream } from 'ai';
 import { Attachment, Chat, Message, Thread } from 'chat';
 
-import { generateChartImage } from '../components/generate-chart';
+import { renderChartImage } from '../components/generate-chart';
 import { env } from '../env';
 import * as chartImageQueries from '../queries/chart-image';
 import * as chatQueries from '../queries/chat.queries';
@@ -523,7 +523,7 @@ class WhatsappService {
 		}
 		try {
 			const displaySettings = await projectQueries.getDisplaySettings(this._projectId);
-			const png = generateChartImage({
+			const png = await renderChartImage({
 				config: part.input,
 				data: sqlOutput.rows,
 				dateFormat: displaySettings.dateFormat,

@@ -89,8 +89,14 @@ See `example/agent/charts/bubble.js` for a full Recharts example.
   browser. Use `.js` or `.mjs` and `React.createElement`.
 - Do **not** `import 'react'` / `import 'recharts'`. Use `ctx.libs`.
 - React plugins MUST return a cleanup that calls `root.unmount()`.
-- PNG export and server-side rendering are unavailable for custom charts (they
-  render only in the browser); the UI hides the download button for them.
+- PNG export works for any plugin — DOM, canvas or Recharts based. In the chat UI
+  it snapshots the live DOM client-side (`apps/frontend/src/lib/chart-export.ts`).
+  In headless contexts (automations, Slack, Telegram, Teams, WhatsApp) the plugin
+  is executed in a headless Chromium page and screenshotted
+  (`apps/backend/src/utils/render-custom-chart.ts`, via `renderChartImage`). That
+  path needs Chromium installed and network access for plugins that import from a
+  CDN; when it fails, the chart is skipped and a warning is logged (built-in
+  charts still render through the fast synchronous SVG path).
 - Adding a plugin requires no code changes to nao itself and no server restart
   when hot reload is active.
 

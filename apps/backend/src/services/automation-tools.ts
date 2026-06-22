@@ -2,13 +2,14 @@ import type { DateFormatSettings } from '@nao/shared/date';
 import type { displayChart } from '@nao/shared/tools';
 import { z } from 'zod/v4';
 
-import { generateChartImage } from '../components/generate-chart';
+import { renderChartImage } from '../components/generate-chart';
 import * as automationQueries from '../queries/automation.queries';
 import * as projectQueries from '../queries/project.queries';
 import * as storyQueries from '../queries/story.queries';
 import type { AutomationIntegrationConfig } from '../types/automation';
 import type { EmailAttachment } from '../types/email';
 import type { ToolContext } from '../types/tools';
+import { logger } from '../utils/logger';
 import { buildDownloadResponse, type QueryDataMap } from '../utils/story-download';
 import { createTool } from '../utils/tools';
 import { emailService } from './email';
@@ -276,14 +277,21 @@ async function buildChartImageAttachments(
 		}
 
 		const title = chart.title ?? `Chart ${index + 1}`;
-		attachments.push({
-			kind: 'chart',
-			title,
-			filename: sanitizeFilename(title, `chart-${index + 1}`, 'png'),
-			content: generateChartImage({ config: chart, data: queryResult.data, dateFormat }),
-			contentType: 'image/png',
-			cid: `automation-chart-${index}-${crypto.randomUUID()}@nao`,
-		});
+		try {
+			const content = await renderChartImage({ config: chart, data: queryResult.data, dateFormat });
+			attachments.push({
+				kind: 'chart',
+				title,
+				filename: sanitizeFilename(title, `chart-${index + 1}`, 'png'),
+				content,
+				contentType: 'image/png',
+				cid: `automation-chart-${index}-${crypto.randomUUID()}@nao`,
+			});
+		} catch (error) {
+			logger.error(`Failed to render chart "${title}" for automation attachment: ${String(error)}`, {
+				source: 'system',
+			});
+		}
 	}
 
 	return attachments;

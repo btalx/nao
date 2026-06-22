@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from 'react';
 import { Pencil } from 'lucide-react';
+import { isBuiltinChartType } from '@nao/shared';
 import type { UIMessage } from '@nao/backend/chat';
 import type { displayChart } from '@nao/shared/tools';
 import { Button } from '@/components/ui/button';
@@ -98,6 +99,10 @@ export function StoryChartEmbedShell({ chart, availableColumns, children }: Stor
 	const edit = useStoryChartEdit();
 	const [isEditOpen, setIsEditOpen] = useState(false);
 	const canEdit = Boolean(edit && chart.rawTag);
+	// Built-in charts draw their title inside the chart (via `buildChart`), but
+	// custom chart plugins don't — and the story embed has no header — so we
+	// render the title here to keep parity with built-in charts.
+	const showCustomTitle = !isBuiltinChartType(chart.chartType) && Boolean(chart.title);
 
 	const config = useMemo<displayChart.Input>(
 		() => ({
@@ -116,7 +121,9 @@ export function StoryChartEmbedShell({ chart, availableColumns, children }: Stor
 	);
 
 	return (
-		<div className={`my-2 relative ${chart.chartType != 'kpi_card' ? 'aspect-3/2' : ''}`}>
+		<div
+			className={`my-2 relative ${chart.chartType != 'kpi_card' ? 'aspect-3/2' : ''} ${showCustomTitle ? 'flex flex-col' : ''}`}
+		>
 			{canEdit && (
 				<Button
 					variant='ghost-muted'
@@ -128,7 +135,12 @@ export function StoryChartEmbedShell({ chart, availableColumns, children }: Stor
 					<Pencil className='size-3.5' />
 				</Button>
 			)}
-			{children}
+			{showCustomTitle && (
+				<div className='shrink-0 px-8 pt-1 text-center text-sm font-semibold text-foreground'>
+					{chart.title}
+				</div>
+			)}
+			{showCustomTitle ? <div className='min-h-0 flex-1'>{children}</div> : children}
 			{canEdit && edit && chart.rawTag && (
 				<ChartConfigEditDialog
 					open={isEditOpen}

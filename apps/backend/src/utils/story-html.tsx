@@ -1,4 +1,4 @@
-import { DEFAULT_COLORS, defaultColorFor, formatCompactNumber, labelize } from '@nao/shared';
+import { DEFAULT_COLORS, defaultColorFor, formatCompactNumber, isBuiltinChartType, labelize } from '@nao/shared';
 import {
 	type DateFormatSettings,
 	DEFAULT_DATE_FORMAT_SETTINGS,
@@ -14,6 +14,10 @@ import React, { createContext, useContext } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { renderChartToSvg } from '../components/generate-chart';
+import * as projectQueries from '../queries/project.queries';
+import { chartPluginService } from '../services/chart-plugin.service';
+import { logger } from './logger';
+import { renderCustomChartImage } from './render-custom-chart';
 import type { QueryDataMap, StoryInput } from './story-download';
 
 const MAX_TABLE_ROWS = 10;
@@ -25,24 +29,105 @@ const CHART_HEIGHT = Math.round((CHART_WIDTH * 9) / 16);
 
 const DateFormatContext = createContext<DateFormatSettings>({ ...DEFAULT_DATE_FORMAT_SETTINGS });
 
+/** Maps a custom chart block to its pre-rendered PNG data URL (see {@link prerenderCustomChartImages}). */
+const CustomChartImageContext = createContext<Map<string, string> | null>(null);
+
 export function generateStoryHtml(
 	story: StoryInput,
 	queryData: QueryDataMap | null,
 	dateFormat?: DateFormatSettings | null,
+	customChartImages?: Map<string, string> | null,
 ): string {
 	const resolvedDateFormat = dateFormat ?? { ...DEFAULT_DATE_FORMAT_SETTINGS };
 	const segments = splitCodeIntoSegments(story.code);
 	const markup = renderToStaticMarkup(
 		<DateFormatContext.Provider value={resolvedDateFormat}>
-			<StoryDocument title={story.title}>
-				{segments.map((seg, i) => (
-					<StorySegment key={i} segment={seg} queryData={queryData} />
-				))}
-				<StoryFooter />
-			</StoryDocument>
+			<CustomChartImageContext.Provider value={customChartImages ?? null}>
+				<StoryDocument title={story.title}>
+					{segments.map((seg, i) => (
+						<StorySegment key={i} segment={seg} queryData={queryData} />
+					))}
+					<StoryFooter />
+				</StoryDocument>
+			</CustomChartImageContext.Provider>
 		</DateFormatContext.Provider>,
 	);
 	return `<!DOCTYPE html>\n${markup}`;
+}
+
+/**
+ * Renders every custom chart plugin in a story to a PNG (in a headless browser)
+ * ahead of the synchronous HTML render, since plugins are browser-only and have
+ * no server-side SVG path. The resulting map is passed to {@link generateStoryHtml}.
+ */
+export async function prerenderCustomChartImages(
+	story: StoryInput,
+	queryData: QueryDataMap | null,
+): Promise<Map<string, string>> {
+	const customCharts = collectChartSegments(splitCodeIntoSegments(story.code)).filter(
+		(chart) => !isBuiltinChartType(chart.chartType),
+	);
+	const images = new Map<string, string>();
+	if (customCharts.length === 0) {
+		return images;
+	}
+
+	await ensurePluginsInitialized();
+
+	for (const chart of customCharts) {
+		const key = chartKey(chart);
+		if (images.has(key)) {
+			continue;
+		}
+		const rows = queryData?.[chart.queryId]?.data as Record<string, unknown>[] | undefined;
+		if (!rows?.length) {
+			continue;
+		}
+		try {
+			const png = await renderCustomChartImage({
+				config: toChartConfig(chart),
+				data: rows,
+				width: CHART_WIDTH,
+				height: CHART_HEIGHT,
+			});
+			images.set(key, `data:image/png;base64,${png.toString('base64')}`);
+		} catch (error) {
+			logger.error(
+				`Failed to render custom chart "${chart.title || chart.chartType}" for story export: ${String(error)}`,
+				{ source: 'system' },
+			);
+		}
+	}
+
+	return images;
+}
+
+async function ensurePluginsInitialized(): Promise<void> {
+	const project = await projectQueries.getDefaultProject();
+	await chartPluginService.initialize(project?.id);
+}
+
+function collectChartSegments(segments: Segment[]): ParsedChartBlock[] {
+	const charts: ParsedChartBlock[] = [];
+	for (const segment of segments) {
+		if (segment.type === 'chart') {
+			charts.push(segment.chart);
+		} else if (segment.type === 'grid') {
+			charts.push(...collectChartSegments(segment.children));
+		}
+	}
+	return charts;
+}
+
+function chartKey(chart: ParsedChartBlock): string {
+	return JSON.stringify({
+		queryId: chart.queryId,
+		chartType: chart.chartType,
+		xAxisKey: chart.xAxisKey,
+		xAxisType: chart.xAxisType,
+		series: chart.series,
+		title: chart.title,
+	});
 }
 
 function StoryDocument({ title, children }: { title: string; children: React.ReactNode }) {
@@ -131,6 +216,7 @@ function GridBlock({
 
 function ChartBlock({ chart, queryData }: { chart: ParsedChartBlock; queryData: QueryDataMap | null }) {
 	const dateFormat = useContext(DateFormatContext);
+	const customChartImages = useContext(CustomChartImageContext);
 	const rows = queryData?.[chart.queryId]?.data as Record<string, unknown>[] | undefined;
 	if (!rows?.length) {
 		return <Placeholder label={chart.title || 'Chart'} message='Data unavailable' />;
@@ -138,6 +224,24 @@ function ChartBlock({ chart, queryData }: { chart: ParsedChartBlock; queryData: 
 
 	if (chart.chartType === 'kpi_card') {
 		return <KpiCards chart={chart} rows={rows} />;
+	}
+
+	// Custom chart plugins are rendered to a PNG ahead of time (see `prerenderCustomChartImages`).
+	if (!isBuiltinChartType(chart.chartType)) {
+		const image = customChartImages?.get(chartKey(chart));
+		if (!image) {
+			return <Placeholder label={chart.title || 'Chart'} message='Could not render chart' />;
+		}
+		return (
+			<div style={{ margin: '16px 0', textAlign: 'center' }}>
+				{chart.title && (
+					<div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 8 }}>
+						{chart.title}
+					</div>
+				)}
+				<img src={image} alt={chart.title || 'Chart'} style={{ maxWidth: '100%' }} />
+			</div>
+		);
 	}
 
 	try {

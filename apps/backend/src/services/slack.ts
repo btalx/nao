@@ -8,7 +8,7 @@ import { WebClient } from '@slack/web-api';
 import { InferUIMessageChunk, readUIMessageStream } from 'ai';
 import { Card, Chat, deriveChannelId, Message, SentMessage, Thread, ThreadImpl } from 'chat';
 
-import { generateChartImage } from '../components/generate-chart';
+import { renderChartImage } from '../components/generate-chart';
 import * as chartImageQueries from '../queries/chart-image';
 import * as chatQueries from '../queries/chat.queries';
 import * as feedbackQueries from '../queries/feedback.queries';
@@ -731,7 +731,7 @@ class ProjectSlackBot {
 		}
 		try {
 			const displaySettings = await projectQueries.getDisplaySettings(this.projectId);
-			const png = generateChartImage({
+			const png = await renderChartImage({
 				config: part.input,
 				data: sqlOutput.rows,
 				dateFormat: displaySettings.dateFormat,

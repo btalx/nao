@@ -1,7 +1,7 @@
 import type { DateFormatSettings } from '@nao/shared/date';
 import type { DownloadFormat } from '@nao/shared/types';
 
-import { generateStoryHtml } from './story-html';
+import { generateStoryHtml, prerenderCustomChartImages } from './story-html';
 import { generateStoryPdf } from './story-pdf';
 
 export type QueryDataMap = Record<string, { data: unknown[]; columns: string[] }>;
@@ -53,11 +53,12 @@ async function generateStoryBuffer(
 	queryData: QueryDataMap | null,
 	dateFormat: DateFormatSettings | null | undefined,
 ): Promise<Buffer> {
+	const customChartImages = await prerenderCustomChartImages(story, queryData);
 	switch (format) {
 		case 'pdf':
-			return generateStoryPdf(story, queryData, dateFormat);
+			return generateStoryPdf(story, queryData, dateFormat, customChartImages);
 		case 'html':
-			return Buffer.from(generateStoryHtml(story, queryData, dateFormat));
+			return Buffer.from(generateStoryHtml(story, queryData, dateFormat, customChartImages));
 	}
 }
 

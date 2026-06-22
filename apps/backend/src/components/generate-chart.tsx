@@ -5,6 +5,7 @@ import React from 'react';
 import { renderToString } from 'react-dom/server';
 
 import { createSvg, type LegendEntry, svgToPng } from '../utils/generate-chart';
+import { renderCustomChartImage } from '../utils/render-custom-chart';
 
 export interface RenderChartInput {
 	config: Pick<displayChart.Input, 'chart_type' | 'x_axis_key' | 'x_axis_type' | 'series' | 'title'>;
@@ -19,6 +20,23 @@ export interface RenderChartInput {
 export function generateChartImage(input: RenderChartInput): Buffer {
 	const svg = renderChartToSvg(input);
 	return svgToPng(svg);
+}
+
+/**
+ * Renders any chart type to a PNG. Built-in charts use the fast synchronous SVG
+ * path; custom chart plugins are rendered in a headless browser (which requires
+ * Chromium) and are therefore async.
+ */
+export async function renderChartImage(input: RenderChartInput): Promise<Buffer> {
+	if (isBuiltinChartType(input.config.chart_type)) {
+		return generateChartImage(input);
+	}
+	return renderCustomChartImage({
+		config: input.config,
+		data: input.data,
+		width: input.width,
+		height: input.height,
+	});
 }
 
 export function renderChartToSvg(input: RenderChartInput): string {

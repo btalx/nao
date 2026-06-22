@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { isBuiltinChartType } from '@nao/shared';
 import type { ChartPluginManifest, ChartPluginModule } from '@nao/shared';
 
@@ -62,6 +63,16 @@ function connectEventStream(): void {
 			manifestPromise = null;
 			notify();
 		}
+	});
+}
+
+/** Loads the chart plugin manifest, re-fetching when plugins hot reload. */
+export function useChartPluginManifest() {
+	const pluginVersion = useChartPluginVersion();
+	return useQuery({
+		queryKey: ['chart-plugin-manifest', pluginVersion],
+		queryFn: getChartPluginManifest,
+		staleTime: Infinity,
 	});
 }
 

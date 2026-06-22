@@ -27,7 +27,9 @@ export function render(element, ctx) {
 	const max = Math.max(...values, 0) || 1;
 
 	const wrapper = document.createElement('div');
-	wrapper.style.cssText = 'display:flex;flex-direction:column;gap:12px;width:100%;padding:8px 4px;';
+	wrapper.style.cssText = 'display:flex;flex-direction:column;gap:12px;width:100%;overflow-y:auto;padding:8px 4px;';
+
+	let firstHead = null;
 
 	data.forEach((row, index) => {
 		const value = Number(row[valueKey]) || 0;
@@ -44,6 +46,7 @@ export function render(element, ctx) {
 		amount.textContent = value.toLocaleString();
 		head.appendChild(label);
 		head.appendChild(amount);
+		if (!firstHead) firstHead = head;
 
 		const track = document.createElement('div');
 		track.style.cssText = 'height:10px;border-radius:9999px;background:rgba(127,127,127,0.15);overflow:hidden;';
@@ -57,5 +60,8 @@ export function render(element, ctx) {
 	});
 
 	element.appendChild(wrapper);
+
+	const headHeight = firstHead ? firstHead.offsetHeight : 0;
+	wrapper.style.maxHeight = `calc(100% - ${headHeight}px - 20px)`;
 	// No cleanup needed — nao clears the container before the next render.
 }

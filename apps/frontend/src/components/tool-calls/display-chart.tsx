@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { buildChart, buildStoryChartBlock, isBuiltinChartType, labelize } from '@nao/shared';
 import { Code, Download, FilePlus, Pencil } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -18,6 +18,7 @@ import type { displayChart, executeSql } from '@nao/shared/tools';
 import type { UIMessage } from '@nao/backend/chat';
 import type { DateRange } from '@/lib/charts.utils';
 import { filterByDateRange, sortByDateKey, DATE_RANGE_OPTIONS, toKey } from '@/lib/charts.utils';
+import { CHART_EXPORT_IGNORE_ATTR, downloadElementAsPng, triggerImageDownload } from '@/lib/chart-export';
 import { findStoryIds } from '@/lib/story.utils';
 import { useChatId } from '@/hooks/use-chat-id';
 import { useDateFormat } from '@/hooks/use-date-format';
@@ -59,6 +60,8 @@ export const DisplayChartToolCall = ({
 	const [isDownloading, setIsDownloading] = useState(false);
 	const [isEditOpen, setIsEditOpen] = useState(false);
 	const isEditable = Boolean(agent && !agent.isReadonly && !agent.isRunning);
+	const isCustomChart = config ? !isBuiltinChartType(config.chart_type) : false;
+	const containerRef = useRef<HTMLDivElement>(null);
 
 	const handleDownload = async () => {
 		if (!config) {
@@ -66,11 +69,17 @@ export const DisplayChartToolCall = ({
 		}
 		setIsDownloading(true);
 		try {
-			const image = await queryClient.fetchQuery(trpc.chart.download.queryOptions({ toolCallId }));
-			const link = document.createElement('a');
-			link.download = `${config.title || 'chart'}.png`;
-			link.href = `data:image/png;base64,${image}`;
-			link.click();
+			const fileName = `${config.title || 'chart'}.png`;
+			// Custom chart plugins only render in the browser, so we snapshot the
+			// live DOM instead of using the server-side image route.
+			if (isCustomChart) {
+				if (containerRef.current) {
+					await downloadElementAsPng(containerRef.current, fileName);
+				}
+			} else {
+				const image = await queryClient.fetchQuery(trpc.chart.download.queryOptions({ toolCallId }));
+				triggerImageDownload(`data:image/png;base64,${image}`, fileName);
+			}
 		} catch (err) {
 			console.error('Error downloading chart image:', err);
 		} finally {
@@ -197,6 +206,7 @@ export const DisplayChartToolCall = ({
 
 	return (
 		<div
+			ref={containerRef}
 			className={`flex flex-col items-center my-4 gap-2 ${config.chart_type !== 'kpi_card' && !normalSize ? 'aspect-3/2' : ''}`}
 		>
 			<div className='flex w-full items-center justify-between gap-2'>
@@ -205,7 +215,7 @@ export const DisplayChartToolCall = ({
 				) : (
 					<div></div>
 				)}
-				<div className='flex items-center gap-1'>
+				<div className='flex items-center gap-1' {...{ [CHART_EXPORT_IGNORE_ATTR]: '' }}>
 					{storyIds.length > 0 && (
 						<Button
 							variant='outline'
@@ -235,7 +245,7 @@ export const DisplayChartToolCall = ({
 							<Code className='size-4' />
 						</Button>
 					)}
-					{config.chart_type != 'kpi_card' && isBuiltinChartType(config.chart_type) && (
+					{config.chart_type != 'kpi_card' && (
 						<Button
 							variant='ghost'
 							size='icon-xs'
@@ -247,7 +257,7 @@ export const DisplayChartToolCall = ({
 							<Download className='size-4' />
 						</Button>
 					)}
-					{isEditable && isBuiltinChartType(config.chart_type) && (
+					{isEditable && (
 						<Button
 							variant='ghost'
 							size='icon-xs'
