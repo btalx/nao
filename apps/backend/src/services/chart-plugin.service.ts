@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
-import { existsSync, readdirSync, readFileSync, statSync, watch } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync, watch } from 'node:fs';
+import { join, sep } from 'node:path';
 
 import type { ChartPluginManifestEntry } from '@nao/shared';
 import { debounce } from '@nao/shared';
@@ -24,146 +24,165 @@ export interface ChartPlugin extends ChartPluginManifestEntry {
 	fileName: string;
 }
 
+/** Payload emitted on the `reload` event when a project's plugin files change. */
+export interface ChartPluginReloadEvent {
+	projectId: string;
+	version: number;
+}
+
+/** Per-project plugin discovery state. Keeping state keyed by project avoids a
+ * process-global singleton that concurrent requests for different projects
+ * could switch between init and read (cross-tenant leak). */
+interface ProjectPluginState {
+	projectPath: string;
+	pluginsFolderPath: string;
+	/** Canonical (symlink-resolved) plugins folder, used for containment checks. */
+	realFolderPath: string | null;
+	plugins: ChartPlugin[];
+	version: number;
+	watcher: ReturnType<typeof watch> | null;
+	debouncedReload: () => void;
+}
+
 /**
  * Discovers and serves custom chart plugins ("vibe coded charts") from a
- * project's `agent/charts/` folder. Mirrors {@link SkillService}: plugins are
- * loaded once per project, watched for changes, and exposed to both the agent
- * (via the system prompt) and the frontend (via the plugin routes).
+ * project's `agent/charts/` folder. State is kept per project so plugin
+ * metadata/source can never leak across projects, and plugin files are
+ * containment-checked (symlink-resolved) before being read.
  */
 class ChartPluginService extends EventEmitter {
-	private _projectPath = '';
-	private _pluginsFolderPath = '';
-	private _plugins: ChartPlugin[] = [];
-	private _version = 0;
-	private _fileWatcher: ReturnType<typeof watch> | null = null;
-	private _debouncedReload: () => void;
-	private _projectId: string | undefined;
-	private _initPromise: Promise<void> | null = null;
+	private _byProject = new Map<string, ProjectPluginState>();
+	private _initPromises = new Map<string, Promise<void>>();
 
 	constructor() {
 		super();
-		this._debouncedReload = debounce(() => {
-			this.loadPlugins();
-			this._version += 1;
-			this.emit('reload', this._version);
-		}, 500);
+		// One `reload` listener is added per open SSE client; lift the default cap.
+		this.setMaxListeners(0);
 	}
 
 	/**
-	 * Discovers plugins for `projectId`. Idempotent for a given project; re-runs
-	 * when the project changes (so a different request's project is honored) and
-	 * retries after a transient failure rather than disabling the service for
-	 * the process lifetime.
+	 * Discovers plugins for `projectId`. Idempotent per project and retries
+	 * after a transient failure rather than permanently disabling the service.
 	 */
 	public async initialize(projectId: string | undefined): Promise<void> {
 		if (!projectId) {
 			return;
 		}
-		if (this._projectId === projectId && this._initPromise) {
-			return this._initPromise;
+		const existing = this._initPromises.get(projectId);
+		if (existing) {
+			return existing;
 		}
-		this._projectId = projectId;
-		this._initPromise = this._initialize(projectId).catch((error) => {
+		const promise = this._initialize(projectId).catch((error) => {
 			// Allow a later call to retry after a transient failure.
-			this._initPromise = null;
-			this._projectId = undefined;
+			this._initPromises.delete(projectId);
 			throw error;
 		});
-		return this._initPromise;
+		this._initPromises.set(projectId, promise);
+		return promise;
 	}
 
 	private async _initialize(projectId: string): Promise<void> {
-		this._teardown();
-
 		const project = await projectQueries.retrieveProjectById(projectId);
-		this._projectPath = project.path || '';
+		const state = this._byProject.get(projectId) ?? this._createState(projectId);
+		this._byProject.set(projectId, state);
 
-		if (!this._projectPath) {
-			this._plugins = [];
-			return;
-		}
+		state.projectPath = project.path || '';
+		state.pluginsFolderPath = state.projectPath ? join(state.projectPath, CHART_PLUGINS_DIR) : '';
+		this._loadPlugins(state);
 
-		this._pluginsFolderPath = join(this._projectPath, CHART_PLUGINS_DIR);
-		this.loadPlugins();
-
-		if (chartHotReloadEnabled) {
-			this._setupFileWatcher();
+		if (chartHotReloadEnabled && state.pluginsFolderPath) {
+			this._setupFileWatcher(state);
 		}
 	}
 
-	private _teardown(): void {
-		this._fileWatcher?.close();
-		this._fileWatcher = null;
-		this._plugins = [];
-		this._projectPath = '';
-		this._pluginsFolderPath = '';
+	private _createState(projectId: string): ProjectPluginState {
+		const state: ProjectPluginState = {
+			projectPath: '',
+			pluginsFolderPath: '',
+			realFolderPath: null,
+			plugins: [],
+			version: 0,
+			watcher: null,
+			debouncedReload: () => {},
+		};
+		state.debouncedReload = debounce(() => {
+			this._loadPlugins(state);
+			state.version += 1;
+			this.emit('reload', { projectId, version: state.version } satisfies ChartPluginReloadEvent);
+		}, 500);
+		return state;
 	}
 
-	public loadPlugins(): void {
-		try {
-			if (!this._pluginsFolderPath || !existsSync(this._pluginsFolderPath)) {
-				this._plugins = [];
-				return;
-			}
-
-			if (!statSync(this._pluginsFolderPath).isDirectory()) {
-				logger.error(`Chart plugins path is not a directory: ${this._pluginsFolderPath}`, { source: 'agent' });
-				this._plugins = [];
-				return;
-			}
-
-			const files = readdirSync(this._pluginsFolderPath).filter((file) =>
-				PLUGIN_EXTENSIONS.some((ext) => file.endsWith(ext)),
-			);
-			this._plugins = files.map((file) => this._readPlugin(file)).sort((a, b) => a.type.localeCompare(b.type));
-		} catch (error) {
-			logger.error(`Failed to load chart plugins: ${String(error)}`, { source: 'agent' });
-			this._plugins = [];
-		}
+	public getPlugins(projectId: string): ChartPlugin[] {
+		return this._byProject.get(projectId)?.plugins ?? [];
 	}
 
-	public getPlugins(): ChartPlugin[] {
-		return this._plugins;
+	public getVersion(projectId: string): number {
+		return this._byProject.get(projectId)?.version ?? 0;
 	}
 
-	public getVersion(): number {
-		return this._version;
-	}
-
-	public hasPlugin(type: string): boolean {
-		return this._plugins.some((plugin) => plugin.type === type);
+	public hasPlugin(projectId: string, type: string): boolean {
+		return this.getPlugins(projectId).some((plugin) => plugin.type === type);
 	}
 
 	/** Returns the raw module source for a plugin type, or null if unknown. */
-	public getPluginSource(type: string): string | null {
-		const plugin = this._plugins.find((p) => p.type === type);
+	public getPluginSource(projectId: string, type: string): string | null {
+		const state = this._byProject.get(projectId);
+		if (!state) {
+			return null;
+		}
+		const plugin = state.plugins.find((p) => p.type === type);
 		if (!plugin) {
 			return null;
 		}
+		return this._readContainedFile(state, plugin.filePath, type);
+	}
+
+	private _loadPlugins(state: ProjectPluginState): void {
 		try {
-			return readFileSync(plugin.filePath, 'utf8');
+			if (!state.pluginsFolderPath || !existsSync(state.pluginsFolderPath)) {
+				state.realFolderPath = null;
+				state.plugins = [];
+				return;
+			}
+
+			if (!statSync(state.pluginsFolderPath).isDirectory()) {
+				logger.error(`Chart plugins path is not a directory: ${state.pluginsFolderPath}`, { source: 'agent' });
+				state.realFolderPath = null;
+				state.plugins = [];
+				return;
+			}
+
+			state.realFolderPath = realpathSync(state.pluginsFolderPath);
+			const files = readdirSync(state.pluginsFolderPath).filter((file) =>
+				PLUGIN_EXTENSIONS.some((ext) => file.endsWith(ext)),
+			);
+			state.plugins = files
+				.map((file) => this._readPlugin(state, file))
+				.filter((plugin): plugin is ChartPlugin => plugin !== null)
+				.sort((a, b) => a.type.localeCompare(b.type));
 		} catch (error) {
-			logger.error(`Failed to read chart plugin "${type}": ${String(error)}`, { source: 'agent' });
-			return null;
+			logger.error(`Failed to load chart plugins: ${String(error)}`, { source: 'agent' });
+			state.realFolderPath = null;
+			state.plugins = [];
 		}
 	}
 
-	private _readPlugin(fileName: string): ChartPlugin {
-		const filePath = join(this._pluginsFolderPath, fileName);
+	private _readPlugin(state: ProjectPluginState, fileName: string): ChartPlugin | null {
+		const filePath = join(state.pluginsFolderPath, fileName);
 		const type = fileName.replace(/\.[^.]+$/, '');
+
+		// Skip plugin files that resolve (via symlink) outside the plugins folder.
+		const source = this._readContainedFile(state, filePath, type);
+		if (source === null) {
+			return null;
+		}
 
 		let name = humanize(type);
 		let description = '';
-		try {
-			const source = readFileSync(filePath, 'utf8');
-			const meta = extractMeta(source);
-			name = meta.name || name;
-			description = meta.description || '';
-		} catch (error) {
-			logger.warn(`Failed to read chart plugin metadata for "${fileName}": ${String(error)}`, {
-				source: 'agent',
-			});
-		}
+		const meta = extractMeta(source);
+		name = meta.name || name;
+		description = meta.description || '';
 
 		return {
 			type,
@@ -175,20 +194,51 @@ class ChartPluginService extends EventEmitter {
 		};
 	}
 
-	private _setupFileWatcher(): void {
-		if (!this._pluginsFolderPath || !existsSync(this._pluginsFolderPath)) {
+	/**
+	 * Reads a file only if its canonical path is contained within the project's
+	 * plugins folder, defeating symlink traversal that could otherwise disclose
+	 * arbitrary host files through the plugin-source endpoint.
+	 */
+	private _readContainedFile(state: ProjectPluginState, filePath: string, type: string): string | null {
+		try {
+			if (!state.realFolderPath) {
+				return null;
+			}
+			const realFile = realpathSync(filePath);
+			if (!isContained(state.realFolderPath, realFile)) {
+				logger.error(`Chart plugin "${type}" resolves outside the plugins folder; refusing to read.`, {
+					source: 'agent',
+				});
+				return null;
+			}
+			return readFileSync(realFile, 'utf8');
+		} catch (error) {
+			logger.error(`Failed to read chart plugin "${type}": ${String(error)}`, { source: 'agent' });
+			return null;
+		}
+	}
+
+	private _setupFileWatcher(state: ProjectPluginState): void {
+		state.watcher?.close();
+		state.watcher = null;
+		if (!state.pluginsFolderPath || !existsSync(state.pluginsFolderPath)) {
 			return;
 		}
 		try {
-			this._fileWatcher = watch(this._pluginsFolderPath, { recursive: true }, (eventType) => {
+			state.watcher = watch(state.pluginsFolderPath, { recursive: true }, (eventType) => {
 				if (eventType === 'change' || eventType === 'rename') {
-					this._debouncedReload();
+					state.debouncedReload();
 				}
 			});
 		} catch (error) {
 			logger.error(`Chart plugins file watcher setup failed: ${String(error)}`, { source: 'agent' });
 		}
 	}
+}
+
+/** True when `file` is the directory itself or sits inside it. */
+function isContained(dir: string, file: string): boolean {
+	return file === dir || file.startsWith(dir + sep);
 }
 
 /** Turns a plugin file name into a readable default name ("revenue_bubble" -> "Revenue Bubble"). */

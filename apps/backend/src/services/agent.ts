@@ -515,7 +515,7 @@ class AgentManager {
 		const userRules = getUserRules(this._toolContext.projectFolder);
 		const connections = getConnections(this._toolContext.projectFolder);
 		const skills = skillService.getSkills();
-		const customCharts = chartPluginService.getPlugins().map(({ type, name, description }) => ({
+		const customCharts = chartPluginService.getPlugins(this.chat.projectId).map(({ type, name, description }) => ({
 			type,
 			name,
 			description,

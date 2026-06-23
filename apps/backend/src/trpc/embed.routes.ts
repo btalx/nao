@@ -71,6 +71,13 @@ export const embedRoutes = router({
 		.input(tokenInput.extend({ storyId: z.string(), format: z.enum(['pdf', 'html']) }))
 		.mutation(async ({ input }) => {
 			const story = await loadEmbedStoryContent(input.storyId, input.token);
-			return buildDownloadResponse(input.format, story.title, story.code, story.queryData, story.dateFormat);
+			return buildDownloadResponse(
+				input.format,
+				story.title,
+				story.code,
+				story.queryData,
+				story.dateFormat,
+				story.projectId,
+			);
 		}),
 });

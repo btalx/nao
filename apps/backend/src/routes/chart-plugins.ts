@@ -5,7 +5,7 @@ import { z } from 'zod/v4';
 import type { App } from '../app';
 import { chartHotReloadEnabled } from '../env';
 import { authMiddleware } from '../middleware/auth';
-import { chartPluginService } from '../services/chart-plugin.service';
+import { type ChartPluginReloadEvent, chartPluginService } from '../services/chart-plugin.service';
 import { HandlerError } from '../utils/error';
 
 const fileParamsSchema = z.object({
@@ -23,20 +23,20 @@ export const chartPluginRoutes = async (app: App) => {
 	app.addHook('preHandler', authMiddleware);
 
 	app.get('/plugins', async (request): Promise<ChartPluginManifest> => {
-		await ensureInitialized(request);
-		const plugins = chartPluginService.getPlugins().map(({ type, name, description, url }) => ({
+		const projectId = await ensureInitialized(request);
+		const plugins = chartPluginService.getPlugins(projectId).map(({ type, name, description, url }) => ({
 			type,
 			name,
 			description,
 			url,
 		}));
-		return { plugins, version: chartPluginService.getVersion(), hotReload: chartHotReloadEnabled };
+		return { plugins, version: chartPluginService.getVersion(projectId), hotReload: chartHotReloadEnabled };
 	});
 
 	app.get('/plugins/:file', { schema: { params: fileParamsSchema } }, async (request, reply) => {
-		await ensureInitialized(request);
+		const projectId = await ensureInitialized(request);
 		const type = request.params.file.replace(/\.[^.]+$/, '');
-		const source = chartPluginService.getPluginSource(type);
+		const source = chartPluginService.getPluginSource(projectId, type);
 		if (source === null) {
 			throw new HandlerError('NOT_FOUND', `Chart plugin "${type}" not found`);
 		}
@@ -51,16 +51,19 @@ export const chartPluginRoutes = async (app: App) => {
 			return reply.status(204).send();
 		}
 
-		await ensureInitialized(request);
+		const projectId = await ensureInitialized(request);
 
 		reply.raw.writeHead(200, {
 			'Content-Type': 'text/event-stream',
 			'Cache-Control': 'no-cache, no-transform',
 			Connection: 'keep-alive',
 		});
-		reply.raw.write(`event: ready\ndata: ${chartPluginService.getVersion()}\n\n`);
+		reply.raw.write(`event: ready\ndata: ${chartPluginService.getVersion(projectId)}\n\n`);
 
-		const onReload = (version: number) => {
+		const onReload = ({ projectId: changedProjectId, version }: ChartPluginReloadEvent) => {
+			if (changedProjectId !== projectId) {
+				return;
+			}
 			reply.raw.write(`event: reload\ndata: ${version}\n\n`);
 		};
 		chartPluginService.on('reload', onReload);
@@ -81,10 +84,13 @@ export const chartPluginRoutes = async (app: App) => {
 /**
  * Lazily initializes the plugin service against the authenticated request's
  * project so plugin source is only served for projects the caller can access.
+ * Returns the resolved project id to scope every subsequent read.
  */
-async function ensureInitialized(request: FastifyRequest): Promise<void> {
+async function ensureInitialized(request: FastifyRequest): Promise<string> {
 	if (!request.project) {
 		throw new HandlerError('NOT_FOUND', 'No project configured for this user');
 	}
-	await chartPluginService.initialize(request.project.id);
+	const projectId = request.project.id;
+	await chartPluginService.initialize(projectId);
+	return projectId;
 }

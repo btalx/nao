@@ -524,6 +524,7 @@ class WhatsappService {
 		try {
 			const displaySettings = await projectQueries.getDisplaySettings(this._projectId);
 			const png = await renderChartImage({
+				projectId: this._projectId,
 				config: part.input,
 				data: sqlOutput.rows,
 				dateFormat: displaySettings.dateFormat,

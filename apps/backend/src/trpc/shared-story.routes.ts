@@ -284,6 +284,7 @@ export const sharedStoryRoutes = {
 				version.code,
 				queryData,
 				displaySettings?.dateFormat,
+				shared.projectId,
 			);
 		}),
 };

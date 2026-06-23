@@ -12,6 +12,7 @@ export type EmbedStoryContent = {
 	code: string;
 	slug: string;
 	chatId: string | null;
+	projectId: string;
 	queryData: StoryQueryDataMap | null;
 	dateFormat: DateFormatSettings | null;
 };
@@ -59,6 +60,7 @@ export async function loadEmbedStoryContent(storyId: string, token: string): Pro
 		code: version.code,
 		slug: version.slug,
 		chatId: version.chatId,
+		projectId,
 		queryData,
 		dateFormat: displaySettings.dateFormat ?? null,
 	};

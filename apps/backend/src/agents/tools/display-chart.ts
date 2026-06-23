@@ -21,9 +21,9 @@ export default createTool<displayChart.Input, displayChart.Output>({
 		// Custom chart plugins (agent/charts/) define their own data expectations,
 		// so skip the built-in shape validation and only check the plugin exists.
 		if (!isBuiltinChartType(chartType)) {
-			if (!chartPluginService.hasPlugin(chartType)) {
+			if (!chartPluginService.hasPlugin(context.projectId, chartType)) {
 				const available = chartPluginService
-					.getPlugins()
+					.getPlugins(context.projectId)
 					.map((p) => p.type)
 					.join(', ');
 				return {

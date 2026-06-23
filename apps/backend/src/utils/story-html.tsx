@@ -14,7 +14,6 @@ import React, { createContext, useContext } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { renderChartToSvg } from '../components/generate-chart';
-import * as projectQueries from '../queries/project.queries';
 import { chartPluginService } from '../services/chart-plugin.service';
 import { logger } from './logger';
 import { renderCustomChartImage } from './render-custom-chart';
@@ -63,16 +62,17 @@ export function generateStoryHtml(
 export async function prerenderCustomChartImages(
 	story: StoryInput,
 	queryData: QueryDataMap | null,
+	projectId: string | null,
 ): Promise<Map<string, string>> {
 	const customCharts = collectChartSegments(splitCodeIntoSegments(story.code)).filter(
 		(chart) => !isBuiltinChartType(chart.chartType),
 	);
 	const images = new Map<string, string>();
-	if (customCharts.length === 0) {
+	if (customCharts.length === 0 || !projectId) {
 		return images;
 	}
 
-	await ensurePluginsInitialized();
+	await ensurePluginsInitialized(projectId);
 
 	for (const chart of customCharts) {
 		const key = chartKey(chart);
@@ -85,6 +85,7 @@ export async function prerenderCustomChartImages(
 		}
 		try {
 			const png = await renderCustomChartImage({
+				projectId,
 				config: toChartConfig(chart),
 				data: rows,
 				width: CHART_WIDTH,
@@ -102,10 +103,9 @@ export async function prerenderCustomChartImages(
 	return images;
 }
 
-async function ensurePluginsInitialized(): Promise<void> {
+async function ensurePluginsInitialized(projectId: string): Promise<void> {
 	try {
-		const project = await projectQueries.getDefaultProject();
-		await chartPluginService.initialize(project?.id);
+		await chartPluginService.initialize(projectId);
 	} catch (error) {
 		// Don't fail the whole export here — each chart render is guarded and
 		// falls back individually if its plugin is unavailable.

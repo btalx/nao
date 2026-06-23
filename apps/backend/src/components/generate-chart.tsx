@@ -8,6 +8,8 @@ import { createSvg, type LegendEntry, svgToPng } from '../utils/generate-chart';
 import { renderCustomChartImage } from '../utils/render-custom-chart';
 
 export interface RenderChartInput {
+	/** Project that owns the chart; required to resolve custom chart plugins. */
+	projectId?: string;
 	config: Pick<displayChart.Input, 'chart_type' | 'x_axis_key' | 'x_axis_type' | 'series' | 'title'>;
 	data: Record<string, unknown>[];
 	width?: number;
@@ -31,7 +33,11 @@ export async function renderChartImage(input: RenderChartInput): Promise<Buffer>
 	if (isBuiltinChartType(input.config.chart_type)) {
 		return generateChartImage(input);
 	}
+	if (!input.projectId) {
+		throw new Error(`Cannot render custom chart "${input.config.chart_type}" without a project context.`);
+	}
 	return renderCustomChartImage({
+		projectId: input.projectId,
 		config: input.config,
 		data: input.data,
 		width: input.width,

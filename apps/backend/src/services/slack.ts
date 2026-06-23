@@ -732,6 +732,7 @@ class ProjectSlackBot {
 		try {
 			const displaySettings = await projectQueries.getDisplaySettings(this.projectId);
 			const png = await renderChartImage({
+				projectId: this.projectId,
 				config: part.input,
 				data: sqlOutput.rows,
 				dateFormat: displaySettings.dateFormat,

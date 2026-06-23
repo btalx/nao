@@ -326,6 +326,7 @@ export const storyRoutes = {
 				story.code,
 				cache?.queryData ?? null,
 				displaySettings?.dateFormat,
+				story.projectId,
 			);
 		}),
 
@@ -363,6 +364,7 @@ export const storyRoutes = {
 				version.code,
 				queryData,
 				displaySettings?.dateFormat,
+				projectId,
 			);
 		}),
 };

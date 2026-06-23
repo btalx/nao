@@ -6,6 +6,8 @@ import { chartPluginService } from '../services/chart-plugin.service';
 import { getBrowser } from './headless-browser';
 
 export interface RenderCustomChartInput {
+	/** Project that owns the chart; scopes which plugin set is used. */
+	projectId: string;
 	config: Pick<displayChart.Input, 'chart_type' | 'x_axis_key' | 'x_axis_type' | 'series' | 'title'>;
 	data: Record<string, unknown>[];
 	width?: number;
@@ -25,7 +27,8 @@ const RENDER_TIMEOUT_MS = 15000;
  * `CustomChart` render context — and screenshot the result.
  */
 export async function renderCustomChartImage(input: RenderCustomChartInput): Promise<Buffer> {
-	const source = chartPluginService.getPluginSource(input.config.chart_type);
+	await chartPluginService.initialize(input.projectId);
+	const source = chartPluginService.getPluginSource(input.projectId, input.config.chart_type);
 	if (!source) {
 		throw new Error(`Custom chart plugin "${input.config.chart_type}" was not found.`);
 	}

@@ -294,7 +294,12 @@ async function buildChartImageAttachments(
 
 		const title = chart.title ?? `Chart ${index + 1}`;
 		try {
-			const content = await renderChartImage({ config: chart, data: queryResult.data, dateFormat });
+			const content = await renderChartImage({
+				projectId: context.projectId,
+				config: chart,
+				data: queryResult.data,
+				dateFormat,
+			});
 			attachments.push({
 				kind: 'chart',
 				title,
@@ -328,7 +333,14 @@ async function buildStoryPdfAttachments(
 			}
 
 			const queryData = await getStoryQueryData(context, latest.code);
-			const pdf = await buildDownloadResponse('pdf', latest.title, latest.code, queryData, dateFormat);
+			const pdf = await buildDownloadResponse(
+				'pdf',
+				latest.title,
+				latest.code,
+				queryData,
+				dateFormat,
+				context.projectId,
+			);
 			return {
 				kind: 'story',
 				title: latest.title,
