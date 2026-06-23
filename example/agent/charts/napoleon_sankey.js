@@ -70,11 +70,12 @@ export async function render(element, ctx) {
 	const lossColor = isDark ? '#e06b60' : '#c0392b';
 	const title = (config && config.title) || (graph.custom ? '' : "Napoleon's 1812 Russian Campaign");
 
+	const palette = colors && colors.length ? colors : [survivorColor];
 	const isLoss = (name) => String(name || '').startsWith('Lost');
 	const nodeColor = (node) =>
-		graph.custom ? colors[node.index % colors.length] : isLoss(node.name) ? lossColor : survivorColor;
+		graph.custom ? palette[node.index % palette.length] : isLoss(node.name) ? lossColor : survivorColor;
 	const linkColor = (link) =>
-		graph.custom ? colors[link.source.index % colors.length] : isLoss(link.target.name) ? lossColor : survivorColor;
+		graph.custom ? palette[link.source.index % palette.length] : isLoss(link.target.name) ? lossColor : survivorColor;
 
 	const format = (value) => Number(value).toLocaleString();
 

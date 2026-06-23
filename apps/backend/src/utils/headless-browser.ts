@@ -72,6 +72,8 @@ export async function closeBrowser(): Promise<void> {
 	await browser?.close().catch(() => {});
 }
 
-for (const signal of ['SIGINT', 'SIGTERM', 'exit'] as const) {
+// Only async-close on signals: the synchronous `exit` event cannot await async
+// work, and puppeteer already kills its launched browser on process exit.
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 	process.on(signal, () => void closeBrowser());
 }

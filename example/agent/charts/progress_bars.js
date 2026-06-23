@@ -24,7 +24,7 @@ export function render(element, ctx) {
 	const mutedColor = theme === 'dark' ? '#9ca3af' : '#6b7280';
 
 	const values = data.map((row) => Number(row[valueKey]) || 0);
-	const max = Math.max(...values, 0) || 1;
+	const max = values.reduce((acc, value) => Math.max(acc, value), 0) || 1;
 
 	const wrapper = document.createElement('div');
 	wrapper.style.cssText = 'display:flex;flex-direction:column;gap:12px;width:100%;overflow-y:auto;padding:8px 4px;';

@@ -286,7 +286,7 @@ export const DisplayChartToolCall = ({
 				chartType={config.chart_type}
 				xAxisKey={config.x_axis_key}
 				series={config.series}
-				xAxisType={config.x_axis_type === 'number' ? 'number' : 'category'}
+				xAxisType={config.x_axis_type ?? 'category'}
 				title={config.title}
 			/>
 		</div>
@@ -297,7 +297,7 @@ export interface ChartDisplayProps {
 	data: Record<string, unknown>[];
 	chartType: string;
 	xAxisKey: string;
-	xAxisType: 'number' | 'category';
+	xAxisType: displayChart.XAxisType;
 	xAxisLabelFormatter?: (value: string) => string;
 	series: displayChart.SeriesConfig[];
 	title?: string;
@@ -378,7 +378,7 @@ export const ChartDisplay = memo(function ChartDisplay({
 						data,
 						chartType: chartType as displayChart.ChartType,
 						xAxisKey,
-						xAxisType,
+						xAxisType: xAxisType === 'number' ? 'number' : 'category',
 						series: visibleSeries,
 						colorFor,
 						labelFormatter,

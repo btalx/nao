@@ -32,7 +32,12 @@ export { isBuiltinChartType };
 
 export async function getChartPluginManifest(): Promise<ChartPluginManifest> {
 	if (!manifestPromise) {
-		manifestPromise = fetchManifest();
+		// Drop the cached promise on failure so a later call can retry after a
+		// transient backend error instead of caching the rejection forever.
+		manifestPromise = fetchManifest().catch((error) => {
+			manifestPromise = null;
+			throw error;
+		});
 	}
 	return manifestPromise;
 }
@@ -82,7 +87,8 @@ export function useChartPluginVersion(): number {
 		(listener) => {
 			listeners.add(listener);
 			// Fetching the manifest opens the hot-reload event stream (when enabled).
-			void getChartPluginManifest();
+			// Swallow errors here — `useChartPluginManifest` surfaces them to the UI.
+			getChartPluginManifest().catch(() => {});
 			return () => listeners.delete(listener);
 		},
 		() => version,

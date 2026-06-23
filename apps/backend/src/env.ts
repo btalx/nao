@@ -88,6 +88,15 @@ const envSchema = z.object({
 	 * deployments where the project folder is static. Set to "false" to disable.
 	 */
 	NAO_CHART_HOT_RELOAD: z.enum(['true', 'false']).optional(),
+	/**
+	 * Base URL of the ESM CDN used to import React/ReactDOM/Recharts when
+	 * rendering custom chart plugins to PNG in a headless browser. Point this at
+	 * an internal mirror for offline/air-gapped deployments. Defaults to esm.sh.
+	 */
+	NAO_CHART_CDN_URL: z
+		.string()
+		.default('https://esm.sh')
+		.transform((val) => val.replace(/\/+$/, '')),
 	NAO_PROJECTS_DIR: z.string().default('./projects'),
 	NAO_CORE_VERSION: z.string().optional(),
 

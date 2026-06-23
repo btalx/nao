@@ -16,7 +16,6 @@ export function render(element, ctx) {
 	const { data, config, colors, theme, libs } = ctx;
 	const isDark = theme === 'dark';
 	const textColor = isDark ? '#e5e7eb' : '#111827';
-	const mutedColor = isDark ? '#9ca3af' : '#6b7280';
 	const borderColor = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)';
 	const panelBg = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)';
 

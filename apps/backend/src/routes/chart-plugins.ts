@@ -1,9 +1,10 @@
 import type { ChartPluginManifest } from '@nao/shared';
+import type { FastifyRequest } from 'fastify';
 import { z } from 'zod/v4';
 
 import type { App } from '../app';
 import { chartHotReloadEnabled } from '../env';
-import * as projectQueries from '../queries/project.queries';
+import { authMiddleware } from '../middleware/auth';
 import { chartPluginService } from '../services/chart-plugin.service';
 import { HandlerError } from '../utils/error';
 
@@ -12,14 +13,17 @@ const fileParamsSchema = z.object({
 });
 
 /**
- * Serves custom chart plugins to the frontend:
+ * Serves custom chart plugins to the frontend (authenticated; the plugin set is
+ * scoped to the requester's project):
  * - `GET /api/charts/plugins`        — manifest of available plugins
  * - `GET /api/charts/plugins/:file`  — a plugin's ES module source
  * - `GET /api/charts/events`         — SSE stream of hot-reload events
  */
 export const chartPluginRoutes = async (app: App) => {
-	app.get('/plugins', async (): Promise<ChartPluginManifest> => {
-		await ensureInitialized();
+	app.addHook('preHandler', authMiddleware);
+
+	app.get('/plugins', async (request): Promise<ChartPluginManifest> => {
+		await ensureInitialized(request);
 		const plugins = chartPluginService.getPlugins().map(({ type, name, description, url }) => ({
 			type,
 			name,
@@ -30,7 +34,7 @@ export const chartPluginRoutes = async (app: App) => {
 	});
 
 	app.get('/plugins/:file', { schema: { params: fileParamsSchema } }, async (request, reply) => {
-		await ensureInitialized();
+		await ensureInitialized(request);
 		const type = request.params.file.replace(/\.[^.]+$/, '');
 		const source = chartPluginService.getPluginSource(type);
 		if (source === null) {
@@ -46,6 +50,8 @@ export const chartPluginRoutes = async (app: App) => {
 		if (!chartHotReloadEnabled) {
 			return reply.status(204).send();
 		}
+
+		await ensureInitialized(request);
 
 		reply.raw.writeHead(200, {
 			'Content-Type': 'text/event-stream',
@@ -73,10 +79,12 @@ export const chartPluginRoutes = async (app: App) => {
 };
 
 /**
- * Lazily initializes the plugin service against the default (single) project so
- * the routes work before any agent run. Idempotent.
+ * Lazily initializes the plugin service against the authenticated request's
+ * project so plugin source is only served for projects the caller can access.
  */
-async function ensureInitialized(): Promise<void> {
-	const project = await projectQueries.getDefaultProject();
-	await chartPluginService.initialize(project?.id);
+async function ensureInitialized(request: FastifyRequest): Promise<void> {
+	if (!request.project) {
+		throw new HandlerError('NOT_FOUND', 'No project configured for this user');
+	}
+	await chartPluginService.initialize(request.project.id);
 }

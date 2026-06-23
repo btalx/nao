@@ -152,7 +152,7 @@ function createEmailTools(projectId: string, integrations: AutomationIntegration
 				if (!emailService.isEnabled()) {
 					throw new Error('SMTP email is not configured.');
 				}
-				const attachments = await buildGeneratedArtifactAttachments(projectId, context);
+				const { attachments, failedCharts } = await buildGeneratedArtifactAttachments(projectId, context);
 				const content = appendInlineChartImages(html ?? `<pre>${escapeHtml(text ?? '')}</pre>`, attachments);
 				const emailAttachments = attachments.map(toEmailAttachment);
 				const resolvedSubject = config.subject ?? subject ?? 'nao automation report';
@@ -166,7 +166,12 @@ function createEmailTools(projectId: string, integrations: AutomationIntegration
 						}),
 					),
 				);
-				return { ok: true, recipients: resolvedRecipients, attachments: attachments.map((a) => a.filename) };
+				return {
+					ok: true,
+					recipients: resolvedRecipients,
+					attachments: attachments.map((a) => a.filename),
+					...(failedCharts.length > 0 && { failedCharts }),
+				};
 			},
 		}),
 	};
@@ -203,14 +208,21 @@ function createSlackTools(
 					chatId,
 					threadId: thread_id,
 				});
-				const attachments = (await buildGeneratedArtifactAttachments(projectId, context)).filter(
-					(attachment) => !uploadedArtifacts.has(attachment.filename),
+				const { attachments: allAttachments, failedCharts } = await buildGeneratedArtifactAttachments(
+					projectId,
+					context,
 				);
+				const attachments = allAttachments.filter((attachment) => !uploadedArtifacts.has(attachment.filename));
 				await slackService.uploadFiles(projectId, result.threadId, attachments.map(toSlackFileUpload));
 				for (const attachment of attachments) {
 					uploadedArtifacts.add(attachment.filename);
 				}
-				return { ok: true, ...result, attachments: attachments.map((attachment) => attachment.filename) };
+				return {
+					ok: true,
+					...result,
+					attachments: attachments.map((attachment) => attachment.filename),
+					...(failedCharts.length > 0 && { failedCharts }),
+				};
 			},
 		}),
 	};
@@ -252,23 +264,27 @@ function toSlackFileUpload(attachment: GeneratedArtifactAttachment): SlackFileUp
 	};
 }
 
-async function buildGeneratedArtifactAttachments(
-	projectId: string,
-	context: ToolContext,
-): Promise<GeneratedArtifactAttachment[]> {
+interface GeneratedArtifacts {
+	attachments: GeneratedArtifactAttachment[];
+	/** Titles of charts that could not be rendered, surfaced back to the agent. */
+	failedCharts: string[];
+}
+
+async function buildGeneratedArtifactAttachments(projectId: string, context: ToolContext): Promise<GeneratedArtifacts> {
 	const displaySettings = await projectQueries.getDisplaySettings(projectId);
 	const dateFormat = displaySettings.dateFormat ?? null;
-	const chartAttachments = await buildChartImageAttachments(context, dateFormat);
+	const { attachments: chartAttachments, failedCharts } = await buildChartImageAttachments(context, dateFormat);
 	const storyAttachments = await buildStoryPdfAttachments(context, dateFormat);
-	return [...chartAttachments, ...storyAttachments];
+	return { attachments: [...chartAttachments, ...storyAttachments], failedCharts };
 }
 
 async function buildChartImageAttachments(
 	context: ToolContext,
 	dateFormat: DateFormatSettings | null,
-): Promise<GeneratedArtifactAttachment[]> {
+): Promise<{ attachments: GeneratedArtifactAttachment[]; failedCharts: string[] }> {
 	const charts = uniqueCharts(context.generatedArtifacts.charts);
 	const attachments: GeneratedArtifactAttachment[] = [];
+	const failedCharts: string[] = [];
 
 	for (const [index, chart] of charts.entries()) {
 		const queryResult = await getQueryResult(context, chart.query_id);
@@ -291,10 +307,11 @@ async function buildChartImageAttachments(
 			logger.error(`Failed to render chart "${title}" for automation attachment: ${String(error)}`, {
 				source: 'system',
 			});
+			failedCharts.push(title);
 		}
 	}
 
-	return attachments;
+	return { attachments, failedCharts };
 }
 
 async function buildStoryPdfAttachments(

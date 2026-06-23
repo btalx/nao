@@ -103,8 +103,14 @@ export async function prerenderCustomChartImages(
 }
 
 async function ensurePluginsInitialized(): Promise<void> {
-	const project = await projectQueries.getDefaultProject();
-	await chartPluginService.initialize(project?.id);
+	try {
+		const project = await projectQueries.getDefaultProject();
+		await chartPluginService.initialize(project?.id);
+	} catch (error) {
+		// Don't fail the whole export here — each chart render is guarded and
+		// falls back individually if its plugin is unavailable.
+		logger.warn(`Chart plugins: initialization for story export failed: ${String(error)}`, { source: 'system' });
+	}
 }
 
 function collectChartSegments(segments: Segment[]): ParsedChartBlock[] {

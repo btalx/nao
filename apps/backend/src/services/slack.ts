@@ -753,6 +753,12 @@ class ProjectSlackBot {
 				source: 'system',
 				context: { chatId: ctx.chatId, toolCallId: part.toolCallId },
 			});
+			// Avoid re-attempting (and re-failing) the same chart on later stream chunks.
+			state.renderedChartIds.add(part.toolCallId);
+			const chartName = part.input.title ? `"${part.input.title}"` : 'a chart';
+			ctx.textBlockIndex = -1;
+			ctx.blocks.push(createTextBlock(`_⚠️ Could not render ${chartName} as an image._`));
+			await ctx.convMessage?.edit(Card({ children: ctx.blocks }));
 		}
 	}
 

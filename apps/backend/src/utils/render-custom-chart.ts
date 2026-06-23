@@ -1,6 +1,7 @@
 import { DEFAULT_COLORS } from '@nao/shared';
 import type { displayChart } from '@nao/shared/tools';
 
+import { env } from '../env';
 import { chartPluginService } from '../services/chart-plugin.service';
 import { getBrowser } from './headless-browser';
 
@@ -55,6 +56,7 @@ export async function renderCustomChartImage(input: RenderCustomChartInput): Pro
 }
 
 function buildChartHtml(source: string, input: RenderCustomChartInput, width: number, height: number): string {
+	const CDN = env.NAO_CHART_CDN_URL;
 	const context = {
 		data: input.data,
 		config: {
@@ -80,9 +82,9 @@ function buildChartHtml(source: string, input: RenderCustomChartInput, width: nu
 <body>
 <div id="chart"></div>
 <script type="module">
-import * as React from 'https://esm.sh/react@19.2.0';
-import * as ReactDOM from 'https://esm.sh/react-dom@19.2.0/client';
-import * as Recharts from 'https://esm.sh/recharts@2.15.4?deps=react@19.2.0,react-dom@19.2.0';
+import * as React from '${CDN}/react@19.2.0';
+import * as ReactDOM from '${CDN}/react-dom@19.2.0/client';
+import * as Recharts from '${CDN}/recharts@2.15.4?deps=react@19.2.0,react-dom@19.2.0';
 
 const element = document.getElementById('chart');
 try {

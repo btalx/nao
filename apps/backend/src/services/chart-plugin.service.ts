@@ -37,7 +37,8 @@ class ChartPluginService extends EventEmitter {
 	private _version = 0;
 	private _fileWatcher: ReturnType<typeof watch> | null = null;
 	private _debouncedReload: () => void;
-	private _initialized = false;
+	private _projectId: string | undefined;
+	private _initPromise: Promise<void> | null = null;
 
 	constructor() {
 		super();
@@ -48,21 +49,37 @@ class ChartPluginService extends EventEmitter {
 		}, 500);
 	}
 
+	/**
+	 * Discovers plugins for `projectId`. Idempotent for a given project; re-runs
+	 * when the project changes (so a different request's project is honored) and
+	 * retries after a transient failure rather than disabling the service for
+	 * the process lifetime.
+	 */
 	public async initialize(projectId: string | undefined): Promise<void> {
-		if (this._initialized || !projectId) {
+		if (!projectId) {
 			return;
 		}
-		this._initialized = true;
-
-		try {
-			const project = await projectQueries.retrieveProjectById(projectId);
-			this._projectPath = project.path || '';
-		} catch (error) {
-			logger.warn(`Chart plugins: could not resolve project path: ${String(error)}`, { source: 'agent' });
-			this._projectPath = '';
+		if (this._projectId === projectId && this._initPromise) {
+			return this._initPromise;
 		}
+		this._projectId = projectId;
+		this._initPromise = this._initialize(projectId).catch((error) => {
+			// Allow a later call to retry after a transient failure.
+			this._initPromise = null;
+			this._projectId = undefined;
+			throw error;
+		});
+		return this._initPromise;
+	}
+
+	private async _initialize(projectId: string): Promise<void> {
+		this._teardown();
+
+		const project = await projectQueries.retrieveProjectById(projectId);
+		this._projectPath = project.path || '';
 
 		if (!this._projectPath) {
+			this._plugins = [];
 			return;
 		}
 
@@ -72,6 +89,14 @@ class ChartPluginService extends EventEmitter {
 		if (chartHotReloadEnabled) {
 			this._setupFileWatcher();
 		}
+	}
+
+	private _teardown(): void {
+		this._fileWatcher?.close();
+		this._fileWatcher = null;
+		this._plugins = [];
+		this._projectPath = '';
+		this._pluginsFolderPath = '';
 	}
 
 	public loadPlugins(): void {
