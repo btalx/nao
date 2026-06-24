@@ -1,8 +1,9 @@
 ---
-description: Create, debug, or extend custom nao chart plugins ("vibe coded charts") that live in a project's agent/charts/ folder
+name: build-custom-charts
+description: Create, debug, or extend custom nao chart types ("vibe coded charts") as ES module plugins in a project's agent/charts/ folder, rendered through the normal display_chart tool. Use when a user wants a chart type beyond nao's built-ins (e.g. bubble, sankey, progress bars), wants to "vibe code a chart", or needs to fix an existing plugin.
 ---
 
-# Custom chart plugins ("vibe coded charts")
+# build-custom-charts
 
 nao ships a fixed set of built-in chart types (bar, line, area, pie, scatter,
 radar, kpi_card, …). Projects can add their **own** chart types by dropping ES
@@ -63,8 +64,7 @@ the standard tool inputs.
 
 **Vanilla JS / DOM** — ignore `ctx.libs` and build DOM directly. Best for
 lightweight visuals or pulling another library from a CDN ES module URL
-(`const d3 = await import('https://esm.sh/d3@7')`). See
-`example/agent/charts/progress_bars.js`.
+(`const d3 = await import('https://esm.sh/d3@7')`).
 
 **React / Recharts** — use the injected libs (no JSX; call
 `React.createElement`, aliased as `h`):
@@ -74,12 +74,10 @@ export function render(element, ctx) {
 	const { React, ReactDOM, Recharts } = ctx.libs;
 	const h = React.createElement;
 	const root = ReactDOM.createRoot(element);
-	root.render(h(Recharts.ResponsiveContainer, { width: '100%', height: '100%' }, /* ...chart... */));
+	root.render(h(Recharts.ResponsiveContainer, { width: '100%', height: '100%' } /* ...chart... */));
 	return () => root.unmount(); // important for React plugins
 }
 ```
-
-See `example/agent/charts/bubble.js` for a full Recharts example.
 
 ## Rules & gotchas
 
@@ -89,27 +87,17 @@ See `example/agent/charts/bubble.js` for a full Recharts example.
   browser. Use `.js` or `.mjs` and `React.createElement`.
 - Do **not** `import 'react'` / `import 'recharts'`. Use `ctx.libs`.
 - React plugins MUST return a cleanup that calls `root.unmount()`.
+- Plugins that pull a library from a CDN must use a browser ES module URL
+  (e.g. `https://esm.sh/<pkg>`); bare specifiers won't resolve.
 - PNG export works for any plugin — DOM, canvas or Recharts based. In the chat UI
-  it snapshots the live DOM client-side (`apps/frontend/src/lib/chart-export.ts`).
-  In headless contexts (automations, Slack, Telegram, Teams, WhatsApp) the plugin
-  is executed in a headless Chromium page and screenshotted
-  (`apps/backend/src/utils/render-custom-chart.ts`, via `renderChartImage`). That
-  path needs Chromium installed and network access for plugins that import from a
-  CDN; when it fails, the chart is skipped and a warning is logged (built-in
-  charts still render through the fast synchronous SVG path).
+  it snapshots the live DOM client-side. In headless contexts (automations,
+  Slack, Telegram, Teams, WhatsApp) the plugin is executed in a headless Chromium
+  page and screenshotted; that path needs Chromium installed and outbound access
+  to public CDNs (requests to internal/private addresses are blocked). When it
+  fails, the chart is skipped and a warning is logged (built-in charts still
+  render through the fast synchronous SVG path).
 - Adding a plugin requires no code changes to nao itself and no server restart
   when hot reload is active.
-
-## Where the system is implemented (for editing nao itself)
-
-- Backend discovery/serving: `apps/backend/src/services/chart-plugin.service.ts`,
-  `apps/backend/src/routes/chart-plugins.ts`
-- Shared contract types: `apps/shared/src/chart-plugin.ts`
-- Schema (relaxed `chart_type`): `apps/shared/src/tools/display-chart.ts`
-- Frontend loader + hot reload: `apps/frontend/src/lib/chart-plugins.ts`
-- Frontend renderer: `apps/frontend/src/components/tool-calls/custom-chart.tsx`,
-  integrated in `apps/frontend/src/components/tool-calls/display-chart.tsx`
-- Agent guidance: `apps/backend/src/components/ai/system-prompt.tsx`
 
 ## Verifying a new plugin
 
@@ -118,3 +106,13 @@ See `example/agent/charts/bubble.js` for a full Recharts example.
 3. In chat, run a query then ask for the chart, or set `chart_type` to `<type>`
    in a story `<chart … />` tag.
 4. With `nao chat` running, edit the file and confirm the chart hot reloads.
+
+## Starter examples
+
+The nao repo ships ready-to-copy plugins under `example/agent/charts/`:
+
+- `bubble.js` — Recharts bubble/scatter chart with marker size as a third series.
+- `progress_bars.js` — dependency-free vanilla-JS "top N" horizontal bar ranking.
+- `napoleon_sankey.js` — Sankey/flow diagram using d3 + d3-sankey from a CDN.
+- `debug.js` — prints the full render context (config, data, theme, colors, libs)
+  so you can inspect exactly what the agent passes to a plugin.
