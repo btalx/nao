@@ -153,7 +153,23 @@ class ChartPluginService extends EventEmitter {
 				return;
 			}
 
-			state.realFolderPath = realpathSync(state.pluginsFolderPath);
+			// Reject a plugins folder that (via symlink) escapes the project root,
+			// otherwise files outside the project could be discovered and served.
+			const realProjectPath = realpathSync(state.projectPath);
+			const realFolderPath = realpathSync(state.pluginsFolderPath);
+			if (!isContained(realProjectPath, realFolderPath)) {
+				logger.error(
+					`Chart plugins folder resolves outside the project root; ignoring: ${state.pluginsFolderPath}`,
+					{
+						source: 'agent',
+					},
+				);
+				state.realFolderPath = null;
+				state.plugins = [];
+				return;
+			}
+
+			state.realFolderPath = realFolderPath;
 			const files = readdirSync(state.pluginsFolderPath).filter((file) =>
 				PLUGIN_EXTENSIONS.some((ext) => file.endsWith(ext)),
 			);

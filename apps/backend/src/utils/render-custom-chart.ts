@@ -1,9 +1,12 @@
 import { DEFAULT_COLORS } from '@nao/shared';
 import type { displayChart } from '@nao/shared/tools';
+import type { HTTPRequest, Page } from 'puppeteer-core';
 
 import { env } from '../env';
 import { chartPluginService } from '../services/chart-plugin.service';
 import { getBrowser } from './headless-browser';
+import { logger } from './logger';
+import { resolvesToPrivateHost } from './private-network';
 
 export interface RenderCustomChartInput {
 	/** Project that owns the chart; scopes which plugin set is used. */
@@ -40,6 +43,7 @@ export async function renderCustomChartImage(input: RenderCustomChartInput): Pro
 	const browser = await getBrowser();
 	const page = await browser.newPage();
 	try {
+		await restrictNetworkEgress(page);
 		await page.setViewport({ width, height, deviceScaleFactor: 2 });
 		await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
 		// The page sets `data-rendered` only after the plugin (and its CDN imports) finish.
@@ -56,6 +60,50 @@ export async function renderCustomChartImage(input: RenderCustomChartInput): Pro
 	} finally {
 		await page.close().catch(() => {});
 	}
+}
+
+/**
+ * Restricts what the (untrusted) plugin code can reach from the headless
+ * browser: only `data:`/`blob:` resources and public http(s) hosts are allowed.
+ * Requests to loopback/private/link-local/reserved addresses — e.g. the cloud
+ * metadata endpoint or internal services — are aborted to prevent SSRF and
+ * internal exfiltration during server-side rendering.
+ */
+async function restrictNetworkEgress(page: Page): Promise<void> {
+	await page.setRequestInterception(true);
+	page.on('request', (request: HTTPRequest) => {
+		void guardRequest(request);
+	});
+}
+
+async function guardRequest(request: HTTPRequest): Promise<void> {
+	try {
+		const url = new URL(request.url());
+		const scheme = url.protocol;
+		if (scheme === 'data:' || scheme === 'blob:' || scheme === 'about:') {
+			await request.continue();
+			return;
+		}
+		if (scheme !== 'http:' && scheme !== 'https:') {
+			await abort(request, request.url());
+			return;
+		}
+		if (await resolvesToPrivateHost(url.hostname)) {
+			await abort(request, request.url());
+			return;
+		}
+		await request.continue();
+	} catch (error) {
+		// Fail closed: if we can't evaluate the request, block it.
+		await abort(request, request.url(), error);
+	}
+}
+
+async function abort(request: HTTPRequest, url: string, error?: unknown): Promise<void> {
+	logger.warn(`Blocked custom chart plugin network request to ${url}` + (error ? `: ${String(error)}` : ''), {
+		source: 'system',
+	});
+	await request.abort('blockedbyclient').catch(() => {});
 }
 
 function buildChartHtml(source: string, input: RenderCustomChartInput, width: number, height: number): string {
