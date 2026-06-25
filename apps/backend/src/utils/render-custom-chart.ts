@@ -6,7 +6,7 @@ import { env } from '../env';
 import { chartPluginService } from '../services/chart-plugin.service';
 import { getBrowser } from './headless-browser';
 import { logger } from './logger';
-import { resolvesToPrivateHost } from './private-network';
+import { getSsrfProxyUrl } from './ssrf-proxy';
 
 export interface RenderCustomChartInput {
 	/** Project that owns the chart; scopes which plugin set is used. */
@@ -41,7 +41,12 @@ export async function renderCustomChartImage(input: RenderCustomChartInput): Pro
 	const html = buildChartHtml(source, input, width, height);
 
 	const browser = await getBrowser();
-	const page = await browser.newPage();
+	const proxyServer = await getSsrfProxyUrl();
+	// Route all plugin egress through the SSRF proxy in an isolated context.
+	// `<-loopback>` cancels Chromium's implicit loopback bypass so even
+	// localhost/127.0.0.1 targets are forced through (and blocked by) the proxy.
+	const context = await browser.createBrowserContext({ proxyServer, proxyBypassList: ['<-loopback>'] });
+	const page = await context.newPage();
 	try {
 		await restrictNetworkEgress(page);
 		await page.setViewport({ width, height, deviceScaleFactor: 2 });
@@ -59,15 +64,22 @@ export async function renderCustomChartImage(input: RenderCustomChartInput): Pro
 		return Buffer.from(screenshot);
 	} finally {
 		await page.close().catch(() => {});
+		await context.close().catch(() => {});
 	}
 }
 
 /**
  * Restricts what the (untrusted) plugin code can reach from the headless
- * browser: only `data:`/`blob:` resources and public http(s) hosts are allowed.
- * Requests to loopback/private/link-local/reserved addresses — e.g. the cloud
- * metadata endpoint or internal services — are aborted to prevent SSRF and
- * internal exfiltration during server-side rendering.
+ * browser. Only `data:`/`blob:`/`about:` resources and `http(s)` requests are
+ * allowed through; every other scheme (e.g. `file:`, `ftp:`) is aborted.
+ *
+ * Egress to loopback/private/link-local/reserved addresses — e.g. the cloud
+ * metadata endpoint or internal services — is blocked by the SSRF proxy this
+ * page's context is bound to, which resolves and pins each host to a validated
+ * public IP. Doing the IP check at the proxy (rather than here, then calling
+ * `request.continue()`) is what removes the DNS-rebinding gap: Chromium never
+ * resolves hosts itself, so a name cannot flip to an internal IP after the
+ * check.
  */
 async function restrictNetworkEgress(page: Page): Promise<void> {
 	await page.setRequestInterception(true);
@@ -78,21 +90,18 @@ async function restrictNetworkEgress(page: Page): Promise<void> {
 
 async function guardRequest(request: HTTPRequest): Promise<void> {
 	try {
-		const url = new URL(request.url());
-		const scheme = url.protocol;
-		if (scheme === 'data:' || scheme === 'blob:' || scheme === 'about:') {
+		const scheme = new URL(request.url()).protocol;
+		if (
+			scheme === 'data:' ||
+			scheme === 'blob:' ||
+			scheme === 'about:' ||
+			scheme === 'http:' ||
+			scheme === 'https:'
+		) {
 			await request.continue();
 			return;
 		}
-		if (scheme !== 'http:' && scheme !== 'https:') {
-			await abort(request, request.url());
-			return;
-		}
-		if (await resolvesToPrivateHost(url.hostname)) {
-			await abort(request, request.url());
-			return;
-		}
-		await request.continue();
+		await abort(request, request.url());
 	} catch (error) {
 		// Fail closed: if we can't evaluate the request, block it.
 		await abort(request, request.url(), error);
