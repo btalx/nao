@@ -30,6 +30,7 @@ import { chartRoutes } from './routes/chart';
 import { deployRoutes } from './routes/deploy';
 import { embedStoryDownloadRoutes } from './routes/embed-story-download';
 import { githubRoutes } from './routes/github';
+import { gitlabRoutes } from './routes/gitlab';
 import { imageRoutes } from './routes/image';
 import { slackRoutes } from './routes/slack';
 import { teamsRoutes } from './routes/teams';
@@ -203,6 +204,10 @@ app.register(deployRoutes, {
 
 app.register(githubRoutes, {
 	prefix: '/api/github',
+});
+
+app.register(gitlabRoutes, {
+	prefix: '/api/gitlab',
 });
 
 app.register(mcpServerRoutes, {

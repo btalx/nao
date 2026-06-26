@@ -10,6 +10,7 @@ import { ProposedEdit } from '../types/context-recommendation';
 import { logger } from '../utils/logger';
 import { isHumanWritableContextPath } from '../utils/nao-context-paths';
 import * as github from './github';
+import * as gitlab from './gitlab';
 
 export interface CreatePullRequestResult {
 	url: string;
@@ -20,27 +21,33 @@ export interface RecommendationRepo {
 	repoFullName: string;
 	branch: string | null;
 	source: 'project' | 'settings' | 'linked';
+	provider: 'github' | 'gitlab';
 }
 
 /**
- * Resolves the GitHub repository used for context pull requests. The project's own
- * git remote wins when it points at GitHub; otherwise we fall back to the repository
- * configured on the recommendations settings page (for projects deployed via
- * `nao deploy` or a mounted volume, where the folder is not a GitHub clone).
+ * Resolves the Git repository (GitHub or GitLab) used for context pull/merge requests.
+ * The project's own git remote wins when it points at GitHub or GitLab; otherwise we fall
+ * back to the repository configured on the recommendations settings page.
  */
 export async function resolveRecommendationRepo(projectId: string): Promise<RecommendationRepo | null> {
 	const project = await projectQueries.getProjectById(projectId);
 	if (project?.path) {
-		const gitInfo = github.getGitInfo(project.path);
-		if (gitInfo.isGithub && gitInfo.repoFullName) {
-			return { repoFullName: gitInfo.repoFullName, branch: gitInfo.branch, source: 'project' };
+		const githubInfo = github.getGitInfo(project.path);
+		if (githubInfo.isGithub && githubInfo.repoFullName) {
+			return { repoFullName: githubInfo.repoFullName, branch: githubInfo.branch, source: 'project', provider: 'github' };
+		}
+
+		const gitlabInfo = gitlab.getGitInfo(project.path);
+		if (gitlabInfo.isGitlab && gitlabInfo.repoFullName) {
+			return { repoFullName: gitlabInfo.repoFullName, branch: gitlabInfo.branch, source: 'project', provider: 'gitlab' };
 		}
 	}
 
 	const config = await crQueries.getConfig(projectId);
 	const configured = config?.repoFullName;
 	if (configured) {
-		return { repoFullName: configured, branch: null, source: 'settings' };
+		const provider = config.repoProvider ?? 'github';
+		return { repoFullName: configured, branch: null, source: 'settings', provider };
 	}
 	return null;
 }
@@ -110,13 +117,8 @@ export async function createRecommendationPullRequest(
 	const repo = await resolvePullRequestRepo(projectId, rec.proposedEdits);
 	if (!repo) {
 		throw new Error(
-			'No GitHub repository is configured for this project. Select one in Settings → Recommendations.',
+			'No GitHub or GitLab repository is configured for this project. Select one in Settings → Recommendations.',
 		);
-	}
-
-	const token = await userQueries.getGithubToken(userId);
-	if (!token) {
-		throw new Error('GitHub is not connected. Connect your GitHub account first.');
 	}
 
 	const edits = filterPullRequestEdits(rec.proposedEdits);
@@ -129,32 +131,71 @@ export async function createRecommendationPullRequest(
 	const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'nao-context-pr-'));
 
 	try {
-		github.cloneRepo(token, repoFullName, workdir);
-		const base = repo.branch ?? github.getGitInfo(workdir).branch ?? 'main';
+		if (repo.provider === 'gitlab') {
+			const token = await userQueries.getGitlabToken(userId);
+			if (!token) {
+				throw new Error('GitLab is not connected. Connect your GitLab account first.');
+			}
 
-		applyEdits(workdir, edits);
+			gitlab.cloneRepo(token, repoFullName, workdir);
+			const base = repo.branch ?? gitlab.getGitInfo(workdir).branch ?? 'main';
 
-		const author = await github.getUserGitIdentity(token);
-		github.commitAllAndPushBranch({
-			token,
-			repoFullName,
-			dir: workdir,
-			branch,
-			message: commitMessage(rec),
-			author,
-			coAuthors: [github.NAO_CO_AUTHOR],
-		});
+			applyEdits(workdir, edits);
 
-		const pr = await github.createPullRequest(token, repoFullName, {
-			title: prTitle(rec),
-			head: branch,
-			base,
-			body: prBody(rec, edits),
-		});
+			const author = await gitlab.getUserGitIdentity(token);
+			gitlab.commitAllAndPushBranch({
+				token,
+				repoFullName,
+				dir: workdir,
+				branch,
+				message: commitMessage(rec),
+				author,
+				coAuthors: [gitlab.NAO_CO_AUTHOR],
+			});
 
-		const prCreatedAt = new Date();
-		await crQueries.setRecommendationPr(rec.id, { prUrl: pr.html_url, prBranch: branch, prCreatedAt });
-		return { url: pr.html_url, branch };
+			const mr = await gitlab.createMergeRequest(token, repoFullName, {
+				title: prTitle(rec),
+				source_branch: branch,
+				target_branch: base,
+				description: prBody(rec, edits),
+			});
+
+			const prCreatedAt = new Date();
+			await crQueries.setRecommendationPr(rec.id, { prUrl: mr.web_url, prBranch: branch, prCreatedAt });
+			return { url: mr.web_url, branch };
+		} else {
+			const token = await userQueries.getGithubToken(userId);
+			if (!token) {
+				throw new Error('GitHub is not connected. Connect your GitHub account first.');
+			}
+
+			github.cloneRepo(token, repoFullName, workdir);
+			const base = repo.branch ?? github.getGitInfo(workdir).branch ?? 'main';
+
+			applyEdits(workdir, edits);
+
+			const author = await github.getUserGitIdentity(token);
+			github.commitAllAndPushBranch({
+				token,
+				repoFullName,
+				dir: workdir,
+				branch,
+				message: commitMessage(rec),
+				author,
+				coAuthors: [github.NAO_CO_AUTHOR],
+			});
+
+			const pr = await github.createPullRequest(token, repoFullName, {
+				title: prTitle(rec),
+				head: branch,
+				base,
+				body: prBody(rec, edits),
+			});
+
+			const prCreatedAt = new Date();
+			await crQueries.setRecommendationPr(rec.id, { prUrl: pr.html_url, prBranch: branch, prCreatedAt });
+			return { url: pr.html_url, branch };
+		}
 	} finally {
 		try {
 			fs.rmSync(workdir, { recursive: true, force: true });
@@ -193,7 +234,7 @@ function resolvePullRequestRepo(projectId: string, edits: ProposedEdit[]): Promi
 	}
 
 	const [[repoFullName, branch]] = targetRepos;
-	return Promise.resolve({ repoFullName, branch, source: 'linked' });
+	return Promise.resolve({ repoFullName, branch, source: 'linked', provider: 'github' as const });
 }
 
 function filterPullRequestEdits(edits: ProposedEdit[]): ProposedEdit[] {

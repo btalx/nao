@@ -26,10 +26,14 @@ export const getErrorMessage = (error: unknown): string | null => {
 };
 
 export const buildGithubAllowlist = (allowedUsers?: string): Set<string> => {
+	return buildUsernameAllowlist(allowedUsers);
+};
+
+export const buildUsernameAllowlist = (allowedUsers?: string): Set<string> => {
 	const allowed = new Set<string>();
 	if (allowedUsers) {
-		for (const login of allowedUsers.split(',')) {
-			const trimmed = login.trim();
+		for (const username of allowedUsers.split(',')) {
+			const trimmed = username.trim();
 			if (trimmed) {
 				allowed.add(trimmed);
 			}

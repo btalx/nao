@@ -19,6 +19,7 @@ import * as orgQueries from './queries/organization.queries';
 import * as userQueries from './queries/user.queries';
 import { emailService } from './services/email';
 import { githubOAuthConfig } from './services/github';
+import * as gitlabService from './services/gitlab';
 import { hasFeature, LICENSE_FEATURES } from './services/license.service';
 import {
 	augmentSocialProvidersWithMicrosoft,
@@ -32,7 +33,7 @@ import {
 	isSocialProviderOidc,
 } from './services/oidc-auth.service';
 import { buildForgotPasswordEmail } from './utils/email-builders';
-import { buildGithubAllowlist, isEmailDomainAllowed, resolveProviderId } from './utils/utils';
+import { buildGithubAllowlist, buildUsernameAllowlist, isEmailDomainAllowed, resolveProviderId } from './utils/utils';
 
 type MetadataHandler = (request: Request) => Promise<Response>;
 
@@ -87,6 +88,7 @@ export function getOpenIdConfigMetadataHandler(): Promise<MetadataHandler> {
 
 async function createAuthInstance(baseURL: string) {
 	const githubAllowlist = buildGithubAllowlist(env.GITHUB_ALLOWED_USERS);
+	const gitlabAllowlist = buildUsernameAllowlist(env.GITLAB_ALLOWED_USERS);
 	const disableEmailSignUp = await shouldDisableEmailSignUp();
 
 	const ssoPlugins: BetterAuthPlugin[] = [];
@@ -137,6 +139,35 @@ async function createAuthInstance(baseURL: string) {
 		};
 	}
 
+	const gitlabConfig = env.GITLAB_SSO ? gitlabService.gitlabOAuthConfig() : null;
+	if (gitlabConfig) {
+		socialProviders.gitlab = {
+			clientId: gitlabConfig.clientId,
+			clientSecret: gitlabConfig.clientSecret,
+			getUserInfo: async (token) => {
+				const profile = await gitlabService.getUser(token.accessToken!);
+
+				if (gitlabAllowlist.size > 0 && !gitlabAllowlist.has(profile.username)) {
+					throw new APIError('FORBIDDEN', {
+						message: 'Your GitLab account is not authorized to access this application.',
+					});
+				}
+
+				const hostname = new URL(env.GITLAB_BASE_URL?.replace(/\/$/, '') || 'https://gitlab.com').hostname;
+				return {
+					user: {
+						id: String(profile.id),
+						name: profile.name || profile.username,
+						email: profile.email ?? `${profile.username}@users.noreply.${hostname}`,
+						image: profile.avatar_url,
+						emailVerified: true,
+					},
+					data: profile,
+				};
+			},
+		};
+	}
+
 	const ssoEnabled = await hasFeature(LICENSE_FEATURES.sso);
 	if (ssoEnabled) {
 		augmentSocialProvidersWithMicrosoft(socialProviders);
@@ -146,6 +177,7 @@ async function createAuthInstance(baseURL: string) {
 	const trustedProviders = [
 		'google',
 		'github',
+		'gitlab',
 		...(ssoEnabled ? [...getTrustedProvidersForMicrosoft(), ...getTrustedProvidersForOidc()] : []),
 	];
 
@@ -171,7 +203,7 @@ async function createAuthInstance(baseURL: string) {
 			}),
 			...ssoPlugins,
 		],
-		trustedOrigins: baseURL ? [baseURL] : undefined,
+		trustedOrigins: baseURL ? [baseURL, ...(env.MODE === 'dev' ? ['http://localhost:3000'] : [])] : undefined,
 		emailAndPassword: {
 			enabled: env.ENABLE_USER_LOGIN === true,
 			disableSignUp: disableEmailSignUp,
@@ -219,6 +251,7 @@ async function createAuthInstance(baseURL: string) {
 						const isSocial =
 							providerId === 'google' ||
 							providerId === 'github' ||
+							providerId === 'gitlab' ||
 							(ssoEnabled && (isSocialProviderMicrosoft(providerId) || isSocialProviderOidc(providerId)));
 
 						if (isCloud) {

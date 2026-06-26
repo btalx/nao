@@ -9,6 +9,7 @@ import * as userQueries from '../queries/user.queries';
 import { createRecommendationPullRequest, resolveRecommendationRepo } from '../services/context-pr.service';
 import { runContextRecommendations } from '../services/context-recommendations.service';
 import * as github from '../services/github';
+import * as gitlabService from '../services/gitlab';
 import {
 	CONTEXT_RECOMMENDATION_FREQUENCIES,
 	CONTEXT_RECOMMENDATION_STATUSES,
@@ -96,12 +97,16 @@ export const contextRecommendationRoutes = {
 			z.object({
 				repoFullName: z
 					.string()
-					.regex(/^[\w.-]+\/[\w.-]+$/, 'Expected a repository in "owner/name" format')
+					.regex(/^[\w./-]+\/[\w.-]+$/, 'Expected a repository in "owner/name" format')
 					.nullable(),
+				provider: z.enum(['github', 'gitlab']).optional(),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
-			await crQueries.updateConfig(ctx.project.id, { repoFullName: input.repoFullName });
+			await crQueries.updateConfig(ctx.project.id, {
+				repoFullName: input.repoFullName,
+				repoProvider: input.repoFullName ? (input.provider ?? 'github') : null,
+			});
 		}),
 
 	setStatus: recommendationsProcedure
@@ -127,23 +132,43 @@ export const contextRecommendationRoutes = {
 		if (!rec?.prUrl) {
 			return null;
 		}
-		const parsed = github.parsePullRequestUrl(rec.prUrl);
-		if (!parsed) {
-			return null;
+
+		const githubParsed = github.parsePullRequestUrl(rec.prUrl);
+		if (githubParsed) {
+			const token = await userQueries.getGithubToken(ctx.user.id);
+			if (!token) {
+				return null;
+			}
+			try {
+				const pr = await github.getPullRequest(token, githubParsed.repo, githubParsed.number);
+				return { state: pr.state, mergedAt: pr.merged_at, htmlUrl: pr.html_url };
+			} catch (err) {
+				logger.warn(`Failed to fetch PR status for recommendation ${input.id}: ${String(err)}`, {
+					source: 'agent',
+				});
+				return null;
+			}
 		}
-		const token = await userQueries.getGithubToken(ctx.user.id);
-		if (!token) {
-			return null;
+
+		const gitlabParsed = gitlabService.parseMergeRequestUrl(rec.prUrl);
+		if (gitlabParsed) {
+			const token = await userQueries.getGitlabToken(ctx.user.id);
+			if (!token) {
+				return null;
+			}
+			try {
+				const mr = await gitlabService.getMergeRequest(token, gitlabParsed.repo, gitlabParsed.iid);
+				const state = mr.state === 'merged' ? ('closed' as const) : mr.state === 'opened' ? ('open' as const) : ('closed' as const);
+				return { state, mergedAt: mr.merged_at, htmlUrl: mr.web_url };
+			} catch (err) {
+				logger.warn(`Failed to fetch MR status for recommendation ${input.id}: ${String(err)}`, {
+					source: 'agent',
+				});
+				return null;
+			}
 		}
-		try {
-			const pr = await github.getPullRequest(token, parsed.repo, parsed.number);
-			return { state: pr.state, mergedAt: pr.merged_at, htmlUrl: pr.html_url };
-		} catch (err) {
-			logger.warn(`Failed to fetch PR status for recommendation ${input.id}: ${String(err)}`, {
-				source: 'agent',
-			});
-			return null;
-		}
+
+		return null;
 	}),
 
 	createPullRequest: recommendationsProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
