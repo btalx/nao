@@ -372,6 +372,13 @@
       "when": 1782391314716,
       "tag": "0052_add_brand_color",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1782391374716,
+      "tag": "0053_add_gitlab_token",
+      "breakpoints": true
     }
   ]
 }
