@@ -102,11 +102,8 @@ export function RecommendationRepoCard() {
 	const gitlabConnected = gitlabStatus.data?.connected === true;
 	const anyConnected = githubConnected || gitlabConnected;
 
-	const cardIcon = repo.data?.provider === 'gitlab' ? (
-		<GitlabIcon className='size-4' />
-	) : (
-		<Github className='size-4' />
-	);
+	const cardIcon =
+		repo.data?.provider === 'gitlab' ? <GitlabIcon className='size-4' /> : <Github className='size-4' />;
 
 	if (isLoading) {
 		return (
@@ -198,9 +195,7 @@ export function RecommendationRepoCard() {
 
 	const { repoFullName, branch, source, provider } = repo.data;
 	const isGitlab = provider === 'gitlab';
-	const repoUrl = isGitlab
-		? `https://gitlab.com/${repoFullName}`
-		: `https://github.com/${repoFullName}`;
+	const repoUrl = isGitlab ? `https://gitlab.com/${repoFullName}` : `https://github.com/${repoFullName}`;
 
 	return (
 		<SettingsCard

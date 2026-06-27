@@ -310,11 +310,7 @@ export interface GitLabMergeRequest {
 	merged_at: string | null;
 }
 
-export async function getMergeRequest(
-	token: string,
-	repoFullName: string,
-	iid: number,
-): Promise<GitLabMergeRequest> {
+export async function getMergeRequest(token: string, repoFullName: string, iid: number): Promise<GitLabMergeRequest> {
 	const encodedPath = encodeURIComponent(repoFullName);
 	const res = await fetch(`${gitlabApiUrl()}/projects/${encodedPath}/merge_requests/${iid}`, {
 		headers: { Authorization: `Bearer ${token}` },

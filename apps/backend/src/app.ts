@@ -299,16 +299,19 @@ if (staticRoot) {
 		prefix: '/',
 		wildcard: false,
 	});
-
-	// SPA fallback: serve index.html for all non-API routes
-	app.setNotFoundHandler((request, reply) => {
-		if (isReservedBackendPath(request.url)) {
-			reply.status(404).send({ error: 'Not found' });
-		} else {
-			reply.sendFile('index.html');
-		}
-	});
 }
+
+// SPA fallback: serve index.html for all non-API routes.
+// In dev mode without a built frontend, redirect to the Vite dev server.
+app.setNotFoundHandler((request, reply) => {
+	if (isReservedBackendPath(request.url)) {
+		reply.status(404).send({ error: 'Not found' });
+	} else if (staticRoot) {
+		reply.sendFile('index.html');
+	} else {
+		reply.redirect(`http://localhost:3000${request.url}`);
+	}
+});
 
 export const startServer = async (opts: { port: number; host: string }) => {
 	if (isCloud) {

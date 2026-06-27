@@ -158,7 +158,12 @@ export const contextRecommendationRoutes = {
 			}
 			try {
 				const mr = await gitlabService.getMergeRequest(token, gitlabParsed.repo, gitlabParsed.iid);
-				const state = mr.state === 'merged' ? ('closed' as const) : mr.state === 'opened' ? ('open' as const) : ('closed' as const);
+				const state =
+					mr.state === 'merged'
+						? ('closed' as const)
+						: mr.state === 'opened'
+							? ('open' as const)
+							: ('closed' as const);
 				return { state, mergedAt: mr.merged_at, htmlUrl: mr.web_url };
 			} catch (err) {
 				logger.warn(`Failed to fetch MR status for recommendation ${input.id}: ${String(err)}`, {

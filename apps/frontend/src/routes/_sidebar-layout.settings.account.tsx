@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Github } from 'lucide-react';
+import GitlabIcon from '@/components/icons/gitlab-icon.svg';
 import { useState } from 'react';
 import type { UserRole } from '@nao/shared/types';
 
@@ -48,6 +49,13 @@ function GeneralPage() {
 	});
 	const disconnectGithub = useMutation(trpc.github.disconnect.mutationOptions());
 
+	const gitlabAvailable = useQuery(trpc.gitlab.isAvailable.queryOptions());
+	const gitlabStatus = useQuery({
+		...trpc.gitlab.getStatus.queryOptions(),
+		enabled: gitlabAvailable.data === true,
+	});
+	const disconnectGitlab = useMutation(trpc.gitlab.disconnect.mutationOptions());
+
 	const editMember: TeamMember | null =
 		user && editOpen
 			? {
@@ -81,6 +89,11 @@ function GeneralPage() {
 	const handleDisconnectGithub = async () => {
 		await disconnectGithub.mutateAsync();
 		await githubStatus.refetch();
+	};
+
+	const handleDisconnectGitlab = async () => {
+		await disconnectGitlab.mutateAsync();
+		await gitlabStatus.refetch();
 	};
 
 	return (
@@ -158,6 +171,50 @@ function GeneralPage() {
 								<a href='/api/github/connect?returnTo=/settings/account'>
 									<Github className='size-3.5' />
 									Connect GitHub
+								</a>
+							</Button>
+						</div>
+					)}
+				</SettingsCard>
+			)}
+
+			{gitlabAvailable.data === true && (
+				<SettingsCard
+					title='GitLab'
+					description='Connect the GitLab account automations can use for proactive actions.'
+					icon={<GitlabIcon className='size-4' />}
+				>
+					{gitlabStatus.data?.connected ? (
+						<div className='flex items-center justify-between gap-4'>
+							<div className='flex items-center gap-3 min-w-0'>
+								{gitlabStatus.data.user.avatarUrl && (
+									<img
+										src={gitlabStatus.data.user.avatarUrl}
+										alt=''
+										className='size-8 rounded-full'
+									/>
+								)}
+								<div className='min-w-0'>
+									<div className='text-sm font-medium truncate'>{gitlabStatus.data.user.username}</div>
+									<div className='text-xs text-muted-foreground'>Connected</div>
+								</div>
+							</div>
+							<Button
+								variant='secondary'
+								size='sm'
+								onClick={handleDisconnectGitlab}
+								disabled={disconnectGitlab.isPending}
+							>
+								Disconnect
+							</Button>
+						</div>
+					) : (
+						<div className='flex items-center justify-between gap-4'>
+							<p className='text-sm text-muted-foreground'>GitLab is not connected yet.</p>
+							<Button variant='secondary' size='sm' asChild>
+								<a href='/api/gitlab/connect?returnTo=/settings/account'>
+									<GitlabIcon className='size-3.5' />
+									Connect GitLab
 								</a>
 							</Button>
 						</div>

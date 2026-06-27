@@ -34,12 +34,22 @@ export async function resolveRecommendationRepo(projectId: string): Promise<Reco
 	if (project?.path) {
 		const githubInfo = github.getGitInfo(project.path);
 		if (githubInfo.isGithub && githubInfo.repoFullName) {
-			return { repoFullName: githubInfo.repoFullName, branch: githubInfo.branch, source: 'project', provider: 'github' };
+			return {
+				repoFullName: githubInfo.repoFullName,
+				branch: githubInfo.branch,
+				source: 'project',
+				provider: 'github',
+			};
 		}
 
 		const gitlabInfo = gitlab.getGitInfo(project.path);
 		if (gitlabInfo.isGitlab && gitlabInfo.repoFullName) {
-			return { repoFullName: gitlabInfo.repoFullName, branch: gitlabInfo.branch, source: 'project', provider: 'gitlab' };
+			return {
+				repoFullName: gitlabInfo.repoFullName,
+				branch: gitlabInfo.branch,
+				source: 'project',
+				provider: 'gitlab',
+			};
 		}
 	}
 

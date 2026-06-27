@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Globe, Loader2, Lock, Search } from 'lucide-react';
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import type { inferRouterOutputs } from '@trpc/server';
 
 import type { TrpcRouter } from '@nao/backend/trpc';
@@ -16,10 +17,11 @@ interface GitlabRepoListProps {
 	selected: string | null;
 	onSelect: (projectPathWithNamespace: string) => void;
 	onSearchChange?: () => void;
+	renderRepoMeta?: (project: GitlabProject) => ReactNode;
 }
 
 /** Searchable, paginated list of the connected user's GitLab projects. */
-export function GitlabRepoList({ selected, onSelect, onSearchChange }: GitlabRepoListProps) {
+export function GitlabRepoList({ selected, onSelect, onSearchChange, renderRepoMeta }: GitlabRepoListProps) {
 	const [search, setSearch] = useState('');
 	const [page, setPage] = useState(1);
 	const debouncedSearch = useDebouncedValue(search, 300);
@@ -85,6 +87,7 @@ export function GitlabRepoList({ selected, onSelect, onSearchChange }: GitlabRep
 								<div className='text-xs text-muted-foreground mt-1'>
 									Updated {formatRelativeDate(new Date(project.last_activity_at))}
 								</div>
+								{renderRepoMeta?.(project)}
 							</div>
 						</button>
 					))

@@ -1,9 +1,20 @@
+import fs from 'node:fs';
+
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
 
+import * as orgQueries from '../queries/organization.queries';
+import * as projectQueries from '../queries/project.queries';
 import * as userQueries from '../queries/user.queries';
 import * as gitlabService from '../services/gitlab';
-import { protectedProcedure } from './trpc';
+import {
+	createNewProject,
+	createTempProjectDir,
+	getProjectNameFromPath,
+	readProjectNameFromConfig,
+	replaceExistingProject,
+} from '../utils/project-import.utils';
+import { adminProtectedProcedure, protectedProcedure } from './trpc';
 
 export const gitlabRoutes = {
 	isAvailable: protectedProcedure.query(() => {
@@ -45,4 +56,67 @@ export const gitlabRoutes = {
 				});
 			}
 		}),
+
+	createProjectFromRepo: protectedProcedure
+		.input(
+			z.object({
+				projectPathWithNamespace: z.string(),
+				projectName: z.string().min(1).optional(),
+				replaceExisting: z.boolean().default(false),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			const token = await userQueries.getGitlabToken(ctx.user.id);
+			if (!token) {
+				throw new TRPCError({ code: 'BAD_REQUEST', message: 'GitLab is not connected' });
+			}
+
+			const membership = await orgQueries.getUserOrgMembership(ctx.user.id);
+			if (!membership) {
+				throw new TRPCError({ code: 'NOT_FOUND', message: 'You are not a member of any organization' });
+			}
+
+			const cloneDir = createTempProjectDir('gitlab-import');
+			try {
+				try {
+					gitlabService.cloneRepo(token, input.projectPathWithNamespace, cloneDir);
+				} catch (err) {
+					throw new TRPCError({
+						code: 'INTERNAL_SERVER_ERROR',
+						message: err instanceof Error ? err.message : 'Failed to clone repository',
+					});
+				}
+
+				const orgId = membership.orgId;
+				const projectName =
+					input.projectName ||
+					readProjectNameFromConfig(cloneDir) ||
+					getProjectNameFromPath(input.projectPathWithNamespace);
+				const existing = await projectQueries.getProjectByOrgAndName(orgId, projectName);
+				if (existing) {
+					if (!input.replaceExisting) {
+						throw new TRPCError({
+							code: 'CONFLICT',
+							message: `A project named "${projectName}" already exists in this organization. Confirm replacement to import this repository over it.`,
+						});
+					}
+					return replaceExistingProject({ sourceDir: cloneDir, project: existing, projectName });
+				}
+
+				return createNewProject({ sourceDir: cloneDir, projectName, orgId });
+			} finally {
+				try {
+					fs.rmSync(cloneDir, { recursive: true, force: true });
+				} catch {
+					// best-effort cleanup
+				}
+			}
+		}),
+
+	getProjectGitInfo: adminProtectedProcedure.query(({ ctx }) => {
+		if (!ctx.project.path) {
+			return null;
+		}
+		return gitlabService.getGitInfo(ctx.project.path);
+	}),
 };

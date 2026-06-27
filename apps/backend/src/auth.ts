@@ -18,6 +18,7 @@ import { env, isCloud, MCP_SERVER_URL } from './env';
 import * as orgQueries from './queries/organization.queries';
 import * as userQueries from './queries/user.queries';
 import { emailService } from './services/email';
+import { logger, serializeError } from './utils/logger';
 import { githubOAuthConfig } from './services/github';
 import * as gitlabService from './services/gitlab';
 import { hasFeature, LICENSE_FEATURES } from './services/license.service';
@@ -254,27 +255,34 @@ async function createAuthInstance(baseURL: string) {
 							providerId === 'gitlab' ||
 							(ssoEnabled && (isSocialProviderMicrosoft(providerId) || isSocialProviderOidc(providerId)));
 
-						if (isCloud) {
-							const matchedOrg =
-								providerId === 'google'
-									? await orgQueries.findOrganizationByEmailDomain(user.email)
-									: null;
-							if (matchedOrg) {
-								await orgQueries.addOrgMemberIfMissing({
-									orgId: matchedOrg.id,
-									userId: user.id,
-									role: env.DEFAULT_USER_ROLE,
-								});
+						try {
+							if (isCloud) {
+								const matchedOrg =
+									providerId === 'google'
+										? await orgQueries.findOrganizationByEmailDomain(user.email)
+										: null;
+								if (matchedOrg) {
+									await orgQueries.addOrgMemberIfMissing({
+										orgId: matchedOrg.id,
+										userId: user.id,
+										role: env.DEFAULT_USER_ROLE,
+									});
+								} else {
+									await orgQueries.initializePersonalOrganization(user.id);
+								}
 							} else {
-								await orgQueries.initializePersonalOrganization(user.id);
+								await orgQueries.initializeDefaultOrganizationForFirstUser(user.id);
+								if (isSocial) {
+									await orgQueries.addUserToDefaultProjectIfExists(user.id);
+								}
 							}
-						} else {
-							await orgQueries.initializeDefaultOrganizationForFirstUser(user.id);
-							if (isSocial) {
-								await orgQueries.addUserToDefaultProjectIfExists(user.id);
-							}
+							await refreshAuthAfterInitialSelfHostedSignup();
+						} catch (err) {
+							logger.error('Failed to initialize organization after user creation', {
+								source: 'system',
+								context: { userId: user.id, error: serializeError(err) },
+							});
 						}
-						await refreshAuthAfterInitialSelfHostedSignup();
 					},
 				},
 			},
