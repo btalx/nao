@@ -91,6 +91,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fontconfig \
     fonts-dejavu-core \
     git \
+    libmariadb3 \
     libpq5 \
     openssh-client \
     supervisor \
