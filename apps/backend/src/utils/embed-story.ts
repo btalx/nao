@@ -8,11 +8,11 @@ import { resolveStoryQueryDataForSandbox, type StoryQueryDataMap } from './story
 
 export type EmbedStoryContent = {
 	storyId: string;
+	projectId: string;
 	title: string;
 	code: string;
 	slug: string;
 	chatId: string | null;
-	projectId: string;
 	queryData: StoryQueryDataMap | null;
 	dateFormat: DateFormatSettings | null;
 };
@@ -56,11 +56,11 @@ export async function loadEmbedStoryContent(storyId: string, token: string): Pro
 
 	return {
 		storyId: version.storyId,
+		projectId,
 		title: version.title,
 		code: version.code,
 		slug: version.slug,
 		chatId: version.chatId,
-		projectId,
 		queryData,
 		dateFormat: displaySettings.dateFormat ?? null,
 	};

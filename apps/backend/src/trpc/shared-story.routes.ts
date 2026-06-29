@@ -10,6 +10,7 @@ import * as storyQueries from '../queries/story.queries';
 import * as storyFolderQueries from '../queries/story-folder.queries';
 import { logActivity } from '../services/activity';
 import { executeLiveQuery, getStoryQueryData, refreshStoryData } from '../services/live-story';
+import { logAnalyticsEvent } from '../utils/analytics-event';
 import { notifySharedItemRecipients } from '../utils/email';
 import { buildDownloadResponse } from '../utils/story-download';
 import { extractStorySummary } from '../utils/story-summary';
@@ -58,6 +59,7 @@ export const sharedStoryRoutes = {
 				visibility: z.enum(SHARE_VISIBILITY).default('project'),
 				allowedUserIds: z.array(z.string()).optional(),
 				pinAfterCreate: z.boolean().optional(),
+				notify: z.boolean().default(false),
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -101,16 +103,18 @@ export const sharedStoryRoutes = {
 				sharedStoryId: created.id,
 			});
 
-			notifySharedItemRecipients({
-				projectId: ctx.project.id,
-				sharerId: ctx.user.id,
-				sharerName: ctx.user.name,
-				shareId: created.id,
-				itemLabel: 'story',
-				itemTitle: story.title,
-				visibility: input.visibility,
-				allowedUserIds: input.allowedUserIds,
-			}).catch((err) => console.error('Failed to notify shared story recipients', err));
+			if (input.notify) {
+				notifySharedItemRecipients({
+					projectId: ctx.project.id,
+					sharerId: ctx.user.id,
+					sharerName: ctx.user.name,
+					shareId: created.id,
+					itemLabel: 'story',
+					itemTitle: story.title,
+					visibility: input.visibility,
+					allowedUserIds: input.allowedUserIds,
+				}).catch((err) => console.error('Failed to notify shared story recipients', err));
+			}
 
 			return created;
 		}),
@@ -130,6 +134,18 @@ export const sharedStoryRoutes = {
 			isLive,
 			cacheSchedule,
 		);
+
+		if (ctx.user.id !== shared.userId) {
+			logAnalyticsEvent({
+				projectId: shared.projectId,
+				type: 'page_view',
+				assetType: 'story',
+				actorUserId: ctx.user.id,
+				storyId: shared.storyId,
+				chatId: shared.chatId,
+				sharedStoryId: shared.id,
+			});
+		}
 
 		return {
 			...shared,
@@ -169,6 +185,18 @@ export const sharedStoryRoutes = {
 			if (activity) {
 				await activityQueries.completeActivity(activity.id, {
 					queriesRefreshed: Object.keys(queryData).length,
+				});
+			}
+			if (story?.id) {
+				logAnalyticsEvent({
+					projectId: shared.projectId,
+					type: 'refresh',
+					assetType: 'story',
+					actorUserId: ctx.user.id,
+					storyId: story.id,
+					chatId: shared.chatId,
+					sharedStoryId: shared.id,
+					metadata: { type: 'refresh', trigger: 'manual', queriesRefreshed: Object.keys(queryData).length },
 				});
 			}
 			return { queryData, cachedAt: new Date() };
@@ -275,6 +303,22 @@ export const sharedStoryRoutes = {
 				version.isLive,
 				version.cacheSchedule,
 			);
+
+			logAnalyticsEvent({
+				projectId: shared.projectId,
+				type: 'download',
+				assetType: 'story',
+				actorUserId: ctx.user.id,
+				storyId: shared.storyId,
+				chatId: shared.chatId,
+				sharedStoryId: shared.id,
+				metadata: {
+					type: 'download',
+					format: input.format,
+					versionNumber: version.version,
+					title: version.title,
+				},
+			});
 
 			const displaySettings = shared.projectId ? await projectQueries.getDisplaySettings(shared.projectId) : null;
 
