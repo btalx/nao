@@ -1,5 +1,5 @@
 {
-  "id": "0e92308a-d668-4609-af83-a0300755b7e7",
+  "id": "c431202d-f8e5-4edf-b7a6-c4c6eb96125d",
   "prevId": "2b805e79-ea51-401e-841b-5dc2e8d766af",
   "version": "7",
   "dialect": "postgresql",
@@ -1196,6 +1196,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "version_group_id": {
+          "name": "version_group_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "source": {
           "name": "source",
           "type": "text",
@@ -1291,6 +1297,21 @@
           "columns": [
             {
               "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "chat_message_versionGroupId_idx": {
+          "name": "chat_message_versionGroupId_idx",
+          "columns": [
+            {
+              "expression": "version_group_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2749,12 +2770,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "superseded_by": {
           "name": "superseded_by",
           "type": "text",
@@ -2783,21 +2798,6 @@
           "columns": [
             {
               "expression": "chat_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "memories_projectId_idx": {
-          "name": "memories_projectId_idx",
-          "columns": [
-            {
-              "expression": "project_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2849,19 +2849,6 @@
             "id"
           ],
           "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "memories_project_id_project_id_fk": {
-          "name": "memories_project_id_project_id_fk",
-          "tableFrom": "memories",
-          "tableTo": "project",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },

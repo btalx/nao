@@ -865,6 +865,9 @@ function PromptMentionHints({
 			<p className='text-xs text-muted-foreground'>
 				The LLM knows your email address{email ? ` (${email})` : ''}, so you can say "send an email to me".
 			</p>
+			<p className='text-xs text-muted-foreground'>
+				Automations have access to their previous run history to avoid repeating work when asked.
+			</p>
 		</>
 	);
 }

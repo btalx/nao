@@ -355,8 +355,29 @@
     {
       "idx": 50,
       "version": "6",
-      "when": 1781945431733,
-      "tag": "0050_add_memories_project_id",
+      "when": 1782226391713,
+      "tag": "0050_add_message_version_group_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1782390602602,
+      "tag": "0051_analytics_event",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1782391309531,
+      "tag": "0052_add_brand_color",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1782762525897,
+      "tag": "0053_add_memories_project_id",
       "breakpoints": true
     }
   ]

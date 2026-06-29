@@ -1,5 +1,6 @@
 import { count } from 'drizzle-orm';
 
+import { getConnections } from '../agents/user-rules';
 import { env } from '../env';
 import { isGithubSsoEnabled } from './github';
 import { getLicense } from './license.service';
@@ -49,10 +50,15 @@ interface StartupAdditionalInfo {
 		azure: boolean;
 		oidc: boolean;
 	};
+	databaseTypes: string[];
 }
 
 async function startupAdditionalInfo(): Promise<StartupAdditionalInfo> {
-	const [userCount, googleConfigured] = await Promise.all([getUserCount(), isGoogleConfigured()]);
+	const [userCount, googleConfigured, databaseTypes] = await Promise.all([
+		getUserCount(),
+		isGoogleConfigured(),
+		getDatabaseTypes(),
+	]);
 
 	return {
 		userCount,
@@ -65,7 +71,27 @@ async function startupAdditionalInfo(): Promise<StartupAdditionalInfo> {
 			azure: isAzureConfigured(),
 			oidc: isOidcConfigured(),
 		},
+		databaseTypes,
 	};
+}
+
+async function getDatabaseTypes(): Promise<string[]> {
+	try {
+		const projectQueries = await import('../queries/project.queries');
+		const project = await projectQueries.getDefaultProject();
+		if (!project?.path) {
+			return [];
+		}
+
+		const connections = getConnections(project.path);
+		if (!connections) {
+			return [];
+		}
+
+		return [...new Set(connections.map((connection) => connection.type))];
+	} catch {
+		return [];
+	}
 }
 
 async function getUserCount(): Promise<number | null> {

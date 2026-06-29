@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e6e9d762-b1f6-44b4-bb44-de26915a7d03",
+  "id": "c511cfd3-42cb-45a3-8108-ff4ffea9c422",
   "prevId": "598c227f-b496-4fd7-94c9-35a872923cab",
   "tables": {
     "account": {
@@ -1084,6 +1084,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "version_group_id": {
+          "name": "version_group_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "source": {
           "name": "source",
           "type": "text",
@@ -1182,6 +1189,13 @@
           "name": "chat_message_createdAt_idx",
           "columns": [
             "created_at"
+          ],
+          "isUnique": false
+        },
+        "chat_message_versionGroupId_idx": {
+          "name": "chat_message_versionGroupId_idx",
+          "columns": [
+            "version_group_id"
           ],
           "isUnique": false
         }
@@ -2553,13 +2567,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "superseded_by": {
           "name": "superseded_by",
           "type": "text",
@@ -2580,13 +2587,6 @@
           "name": "memories_chatId_idx",
           "columns": [
             "chat_id"
-          ],
-          "isUnique": false
-        },
-        "memories_projectId_idx": {
-          "name": "memories_projectId_idx",
-          "columns": [
-            "project_id"
           ],
           "isUnique": false
         },
@@ -2623,19 +2623,6 @@
             "id"
           ],
           "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "memories_project_id_project_id_fk": {
-          "name": "memories_project_id_project_id_fk",
-          "tableFrom": "memories",
-          "tableTo": "project",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },

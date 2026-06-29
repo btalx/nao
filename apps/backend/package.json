@@ -64,7 +64,7 @@
 		"@modelcontextprotocol/ext-apps": "^1.7.1",
 		"@modelcontextprotocol/sdk": "^1.29.0",
 		"@nao/shared": "*",
-		"@openrouter/ai-sdk-provider": "^2.2.3",
+		"@openrouter/ai-sdk-provider": "^2.10.0",
 		"@pydantic/monty": "^0.0.7",
 		"@resvg/resvg-js": "^2.6.2",
 		"@slack/socket-mode": "^2.0.6",

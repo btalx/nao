@@ -17,6 +17,7 @@ import {
 	resolveStory,
 } from './helpers';
 import { registerAgentToolAsMcp, registerMcpTool } from './register-mcp-tool';
+import { STORY_LIST_ITEM_SCHEMA, toStoryListItem } from './story-list-item';
 
 const DISPLAY_CHART_DESCRIPTION =
 	'Render an interactive chart embed from a previously executed query.\n\n' +
@@ -175,17 +176,7 @@ function registerStoryManagementTools(server: McpServer, ctx: McpContext): void 
 		},
 		outputSchema: {
 			stories: z
-				.array(
-					z.object({
-						id: z.string().describe('Story UUID.'),
-						title: z.string().describe('Story title.'),
-						url: z.url().describe('URL to open the story in the nao UI.'),
-						chatUrl: z.url().nullable().describe('Source chat URL, or null for standalone stories.'),
-						archived: z.boolean().describe('True if soft-deleted via `archive_story` (still recoverable).'),
-						createdAt: z.string().describe('ISO timestamp of creation.'),
-						updatedAt: z.string().describe('ISO timestamp of last edit.'),
-					}),
-				)
+				.array(STORY_LIST_ITEM_SCHEMA)
 				.describe('Stories visible to the current user in this project, newest first.'),
 		},
 		handler: async ({ limit, archived }) => {
@@ -193,15 +184,9 @@ function registerStoryManagementTools(server: McpServer, ctx: McpContext): void 
 				archived,
 				limit,
 			});
-			const result = stories.map((story) => ({
-				id: story.id,
-				title: story.title,
-				createdAt: story.createdAt,
-				updatedAt: story.updatedAt,
-				archived: story.archivedAt !== null,
-				url: storyUrl(story),
-				chatUrl: storyChatUrl(story),
-			}));
+			const result = stories.map((story) =>
+				toStoryListItem(story, { url: storyUrl(story), chatUrl: storyChatUrl(story) }),
+			);
 			const output = { stories: result };
 			return {
 				content: [{ type: 'text' as const, text: JSON.stringify(output) }],
