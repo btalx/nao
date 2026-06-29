@@ -1,11 +1,11 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Github } from 'lucide-react';
-import GitlabIcon from '@/components/icons/gitlab-icon.svg';
 import { useState } from 'react';
 import type { UserRole } from '@nao/shared/types';
 
 import type { TeamMember } from '@/components/settings/team';
+import GitlabIcon from '@/components/icons/gitlab-icon.svg';
 import { EditMemberDialog } from '@/components/settings/team';
 import { NewsletterSubscribeInlineForm } from '@/components/newsletter-subscribe';
 import { signOut, useSession } from '@/lib/auth-client';
@@ -195,7 +195,9 @@ function GeneralPage() {
 									/>
 								)}
 								<div className='min-w-0'>
-									<div className='text-sm font-medium truncate'>{gitlabStatus.data.user.username}</div>
+									<div className='text-sm font-medium truncate'>
+										{gitlabStatus.data.user.username}
+									</div>
 									<div className='text-xs text-muted-foreground'>Connected</div>
 								</div>
 							</div>

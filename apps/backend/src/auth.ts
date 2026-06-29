@@ -18,7 +18,6 @@ import { env, isCloud, MCP_SERVER_URL } from './env';
 import * as orgQueries from './queries/organization.queries';
 import * as userQueries from './queries/user.queries';
 import { emailService } from './services/email';
-import { logger, serializeError } from './utils/logger';
 import { githubOAuthConfig } from './services/github';
 import * as gitlabService from './services/gitlab';
 import { hasFeature, LICENSE_FEATURES } from './services/license.service';
@@ -34,6 +33,7 @@ import {
 	isSocialProviderOidc,
 } from './services/oidc-auth.service';
 import { buildForgotPasswordEmail } from './utils/email-builders';
+import { logger, serializeError } from './utils/logger';
 import { buildGithubAllowlist, buildUsernameAllowlist, isEmailDomainAllowed, resolveProviderId } from './utils/utils';
 
 type MetadataHandler = (request: Request) => Promise<Response>;
