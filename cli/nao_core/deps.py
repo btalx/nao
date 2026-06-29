@@ -52,6 +52,24 @@ _PROVIDER_ALIASES: dict[str, str] = {
     "vertex": "gemini",
 }
 
+# Native system libraries required by certain backends, keyed by ibis backend
+# name. Used to give an actionable hint when the Python package is installed but
+# the shared library it links against is missing from the host.
+_SYSTEM_LIBRARY_HINTS: dict[str, str] = {
+    "mysql": "the MySQL/MariaDB client library (on Debian/Ubuntu: 'apt-get install libmariadb3')",
+    "postgres": "the PostgreSQL client library (on Debian/Ubuntu: 'apt-get install libpq5')",
+    "mssql": "the unixODBC driver manager (on Debian/Ubuntu: 'apt-get install unixodbc')",
+}
+
+# Substrings found in ImportError messages when a native shared library cannot
+# be loaded, across Linux, macOS and Windows.
+_SHARED_LIBRARY_ERROR_MARKERS: tuple[str, ...] = (
+    "cannot open shared object file",
+    "library not loaded",
+    "image not found",
+    "dll load failed",
+)
+
 
 # ---------------------------------------------------------------------------
 # Public helpers
@@ -76,12 +94,33 @@ class MissingDependencyError(ImportError):
         super().__init__(message)
 
 
+class MissingSystemLibraryError(ImportError):
+    """Raised when a dependency is installed but a native library it links
+    against cannot be loaded (e.g. a missing shared object on the host)."""
+
+    def __init__(self, component: str, original_error: BaseException, hint: str | None = None):
+        self.component = component
+        self.original_error = original_error
+        lines = [
+            f"The '{component}' backend is installed but a required system library could not be loaded:",
+            f"  {original_error}",
+            "This is a missing system (native) library, not a missing Python package.",
+        ]
+        if hint:
+            lines.append(f"Install {hint} and try again.")
+        super().__init__("\n".join(lines))
+
+
 def require_dependency(package: str, extra: str, purpose: str = "") -> None:
     """Verify that *package* is importable, raising a helpful error if not."""
     try:
         importlib.import_module(package)
-    except ImportError:
-        raise MissingDependencyError(package, extra, purpose) from None
+    except ModuleNotFoundError as error:
+        raise MissingDependencyError(package, extra, purpose) from error
+    except ImportError as error:
+        if _is_missing_shared_library(error):
+            raise MissingSystemLibraryError(package, error) from error
+        raise
 
 
 def require_database_backend(backend: str, *, extra: str | None = None, database_type: str | None = None) -> None:
@@ -90,12 +129,16 @@ def require_database_backend(backend: str, *, extra: str | None = None, database
     display_type = database_type or backend
     try:
         importlib.import_module(f"ibis.backends.{backend}")
-    except (ImportError, ModuleNotFoundError):
+    except ModuleNotFoundError as error:
         raise MissingDependencyError(
             f"ibis-framework[{backend}]",
             install_extra,
             f"to connect to {display_type} databases",
-        ) from None
+        ) from error
+    except ImportError as error:
+        if _is_missing_shared_library(error):
+            raise MissingSystemLibraryError(display_type, error, _SYSTEM_LIBRARY_HINTS.get(backend)) from error
+        raise
 
 
 def get_required_extras(config: NaoConfig) -> list[str]:
@@ -168,6 +211,12 @@ def install_extras(extras: list[str]) -> bool:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _is_missing_shared_library(error: ImportError) -> bool:
+    """Heuristically detect an ImportError caused by a missing native library."""
+    message = str(error).lower()
+    return any(marker in message for marker in _SHARED_LIBRARY_ERROR_MARKERS)
 
 
 def _resolve_extra(provider_or_type: str) -> str | None:
