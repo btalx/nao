@@ -10,6 +10,9 @@
         - usage_stats.usage_count -> int
         - usage_stats.common_joins -> list of (table_name, count) tuples
         - usage_stats.top_queries -> list of (sql, count) tuples
+    - manual_notes (str | None): Human-written notes for this table, read from
+      notes/type=<type>/database=<name>/schema=<dataset>/<table_name>.md if present
+      (see `nao notes`). Never overwritten by sync.
 #}
 # {{ table_name }}
 
@@ -46,6 +49,12 @@
 _No description available._
 {% endif %}
 
+{% if manual_notes %}
+## Notes
+
+{{ manual_notes }}
+
+{% endif %}
 {% if partitions %}
 ## Partition / Clustering columns
 

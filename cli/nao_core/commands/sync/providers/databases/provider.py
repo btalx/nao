@@ -28,6 +28,7 @@ from nao_core.commands.sync.cleanup import (
     cleanup_stale_paths,
     get_database_folder_names,
 )
+from nao_core.commands.sync.providers.databases.notes import manual_notes_path, read_manual_notes
 from nao_core.commands.sync.providers.databases.query_history import TableUsageStats, compute_table_usage
 from nao_core.config import AnyDatabaseConfig, NaoConfig
 from nao_core.config.databases.base import DatabaseConfig, DatabaseTemplate, ProfilingRefreshPolicy
@@ -297,6 +298,12 @@ def sync_database(
                 ctx.set_exclude_columns(db_config.exclude_columns)
                 table_usage = usage_stats.get(f"{schema}.{table}", TableUsageStats())
 
+                manual_notes = (
+                    read_manual_notes(manual_notes_path(project_path, db_config.type, db_folder, schema, table))
+                    if project_path is not None
+                    else None
+                )
+
                 for template_name in templates:
                     output_filename = Path(template_name).stem
                     tpl_name = output_filename.replace(".md", "")
@@ -321,6 +328,7 @@ def sync_database(
                             db=ctx,
                             table_name=table,
                             dataset=schema,
+                            manual_notes=manual_notes,
                             **({"nao": nao_ctx} if nao_ctx else {}),
                             **extra_ctx,
                         )

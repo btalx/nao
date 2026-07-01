@@ -157,6 +157,7 @@ def create_empty_structure(project_path: Path) -> tuple[list[str], list[CreatedF
     """
     FOLDERS = [
         "databases",
+        "notes",
         "queries",
         "docs",
         "semantics",

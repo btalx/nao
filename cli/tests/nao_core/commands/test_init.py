@@ -63,6 +63,7 @@ class TestCreateEmptyStructure:
 
         expected_folders = [
             "databases",
+            "notes",
             "queries",
             "docs",
             "semantics",
