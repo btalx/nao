@@ -75,7 +75,9 @@ function ContextRecommendationsPrompt({
 				</Span>
 				<Span>
 					Choose <Code>suggestedFile</Code> as the file whose pull request should change: context files such
-					as <Code>RULES.md</Code> or <Code>semantics/*.md</Code> for agent instructions
+					as <Code>RULES.md</Code> or <Code>semantics/*.md</Code> for agent instructions,{' '}
+					<Code>notes/type=&lt;type&gt;/database=&lt;name&gt;/schema=&lt;schema&gt;/&lt;table&gt;.md</Code>{' '}
+					for a fix scoped to one table
 					{contextRepoConnected ? '' : ' when a context repo is connected'}, or{' '}
 					<Code>repos/&lt;name&gt;/...</Code> when the real fix belongs in a linked source repo. Do not
 					combine files from different repositories in one recommendation.

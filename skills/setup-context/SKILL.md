@@ -64,7 +64,7 @@ That's the set this skill ships. Other values are valid per-warehouse (`how_to_u
 
 **Don't use `accessors` — deprecated** (renamed to `templates`).
 
-`nao init` creates: `nao_config.yaml`, empty `RULES.md`, `.naoignore`, and folders `databases/`, `repos/`, `docs/`, `semantics/`, `queries/`, `tests/`, `agent/{tools,mcps,skills}/`.
+`nao init` creates: `nao_config.yaml`, empty `RULES.md`, `.naoignore`, and folders `databases/`, `notes/`, `repos/`, `docs/`, `semantics/`, `queries/`, `tests/`, `agent/{tools,mcps,skills}/`.
 
 ## Step 3 — `nao sync`
 

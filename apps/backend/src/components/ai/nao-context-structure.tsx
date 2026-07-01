@@ -22,6 +22,12 @@ export function NaoContextStructure() {
 					Each table has files describing the table schema and the data in the table (like columns.md,
 					preview.md, etc.)
 				</ListItem>
+				<ListItem>
+					Human-written notes for a table (added with <Italic>nao notes</Italic>) live under notes/type=
+					{`<database_type>`}/database={`<database_name>`}/schema={`<schema_name>`}/{`<table_name>`}.md —
+					outside <Italic>databases</Italic> so `nao sync` never overwrites them. Sync folds their content
+					into that table's how_to_use.md.
+				</ListItem>
 			</List>
 		</Block>
 	);
