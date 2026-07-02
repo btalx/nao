@@ -9,9 +9,14 @@ import * as userQueries from '../queries/user.queries';
 import { ProposedEdit, ProposedEditTargetRepo } from '../types/context-recommendation';
 import { logger } from '../utils/logger';
 import { isHumanWritableContextPath } from '../utils/nao-context-paths';
-import type { GitIdentity } from './github';
 import * as github from './github';
 import * as gitlab from './gitlab';
+
+/** Git commit author/co-author identity. Defined here since it's a provider-agnostic concept, not owned by either. */
+interface GitIdentity {
+	name: string;
+	email: string;
+}
 
 /** Provider-specific glue for `createReviewRequest` — everything else about opening a PR/MR is identical. */
 interface ReviewRequestProvider {
