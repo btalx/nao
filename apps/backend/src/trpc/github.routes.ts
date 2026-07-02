@@ -169,7 +169,7 @@ export const githubRoutes = {
 		}
 
 		try {
-			await githubService.pullRepo(token, gitInfo.repoFullName, ctx.project.path);
+			githubService.pullRepo(token, gitInfo.repoFullName, ctx.project.path);
 			return githubService.getGitInfo(ctx.project.path);
 		} catch (err) {
 			throw new TRPCError({
