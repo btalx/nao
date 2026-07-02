@@ -25,10 +25,6 @@ export const getErrorMessage = (error: unknown): string | null => {
 	return String(error);
 };
 
-export const buildGithubAllowlist = (allowedUsers?: string): Set<string> => {
-	return buildUsernameAllowlist(allowedUsers);
-};
-
 export const buildUsernameAllowlist = (allowedUsers?: string): Set<string> => {
 	const allowed = new Set<string>();
 	if (allowedUsers) {

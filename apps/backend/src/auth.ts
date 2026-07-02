@@ -34,7 +34,7 @@ import {
 } from './services/oidc-auth.service';
 import { buildForgotPasswordEmail } from './utils/email-builders';
 import { logger, serializeError } from './utils/logger';
-import { buildGithubAllowlist, buildUsernameAllowlist, isEmailDomainAllowed, resolveProviderId } from './utils/utils';
+import { buildUsernameAllowlist, isEmailDomainAllowed, resolveProviderId } from './utils/utils';
 
 type MetadataHandler = (request: Request) => Promise<Response>;
 
@@ -88,7 +88,7 @@ export function getOpenIdConfigMetadataHandler(): Promise<MetadataHandler> {
 }
 
 async function createAuthInstance(baseURL: string) {
-	const githubAllowlist = buildGithubAllowlist(env.GITHUB_ALLOWED_USERS);
+	const githubAllowlist = buildUsernameAllowlist(env.GITHUB_ALLOWED_USERS);
 	const gitlabAllowlist = buildUsernameAllowlist(env.GITLAB_ALLOWED_USERS);
 	const disableEmailSignUp = await shouldDisableEmailSignUp();
 
