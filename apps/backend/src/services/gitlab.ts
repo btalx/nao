@@ -342,7 +342,7 @@ export function parseMergeRequestUrl(url: string): { repo: string; iid: number }
 		return null;
 	}
 
-	const basePath = parsedBase.pathname === '/' ? '' : parsedBase.pathname;
+	const basePath = parsedBase.pathname.replace(/\/+$/, '');
 	if (!parsedUrl.pathname.startsWith(basePath)) {
 		return null;
 	}
