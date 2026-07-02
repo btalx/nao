@@ -7,6 +7,7 @@ import * as orgQueries from '../queries/organization.queries';
 import * as projectQueries from '../queries/project.queries';
 import * as userQueries from '../queries/user.queries';
 import * as gitlabService from '../services/gitlab';
+import { logger, serializeError } from '../utils/logger';
 import {
 	createNewProject,
 	createTempProjectDir,
@@ -50,10 +51,10 @@ export const gitlabRoutes = {
 			try {
 				return await gitlabService.listProjects(token, { page: input.page, search: input.search });
 			} catch (err) {
-				throw new TRPCError({
-					code: 'INTERNAL_SERVER_ERROR',
-					message: err instanceof Error ? err.message : 'Failed to list projects',
+				logger.error(`Failed to list GitLab projects: ${JSON.stringify(serializeError(err))}`, {
+					source: 'http',
 				});
+				throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to list projects' });
 			}
 		}),
 
@@ -81,10 +82,10 @@ export const gitlabRoutes = {
 				try {
 					gitlabService.cloneRepo(token, input.projectPathWithNamespace, cloneDir);
 				} catch (err) {
-					throw new TRPCError({
-						code: 'INTERNAL_SERVER_ERROR',
-						message: err instanceof Error ? err.message : 'Failed to clone repository',
+					logger.error(`Failed to clone GitLab repository: ${JSON.stringify(serializeError(err))}`, {
+						source: 'http',
 					});
+					throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to clone repository' });
 				}
 
 				const orgId = membership.orgId;
