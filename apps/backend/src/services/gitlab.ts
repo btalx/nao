@@ -342,7 +342,13 @@ export function parseMergeRequestUrl(url: string): { repo: string; iid: number }
 		return null;
 	}
 
-	const match = parsedUrl.pathname.match(/^\/(.+)\/-\/merge_requests\/(\d+)$/);
+	const basePath = parsedBase.pathname === '/' ? '' : parsedBase.pathname;
+	if (!parsedUrl.pathname.startsWith(basePath)) {
+		return null;
+	}
+	const relativePath = parsedUrl.pathname.slice(basePath.length);
+	const match = relativePath.match(/^\/(.+)\/-\/merge_requests\/(\d+)$/);
+
 	if (!match) {
 		return null;
 	}
