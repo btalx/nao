@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { GitBranch, Github, Unlink } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { RepoProvider } from '@nao/shared/types';
 
@@ -366,6 +366,10 @@ interface RepoPickerDialogProps {
 function RepoPickerDialog({ open, provider, onOpenChange, onConfirm, isPending, error }: RepoPickerDialogProps) {
 	const [selected, setSelected] = useState<string | null>(null);
 	const isGitlab = provider === 'gitlab';
+
+	useEffect(() => {
+		setSelected(null);
+	}, [provider, open]);
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
