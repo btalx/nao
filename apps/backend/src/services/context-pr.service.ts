@@ -22,6 +22,12 @@ export interface RecommendationRepo {
 	branch: string | null;
 	source: 'project' | 'settings' | 'linked';
 	provider: 'github' | 'gitlab';
+	webUrl: string;
+}
+
+function buildRepoWebUrl(provider: 'github' | 'gitlab', repoFullName: string): string {
+	const base = provider === 'gitlab' ? gitlab.gitlabBaseUrl() : 'https://github.com';
+	return `${base}/${repoFullName}`;
 }
 
 /**
@@ -39,6 +45,7 @@ export async function resolveRecommendationRepo(projectId: string): Promise<Reco
 				branch: githubInfo.branch,
 				source: 'project',
 				provider: 'github',
+				webUrl: buildRepoWebUrl('github', githubInfo.repoFullName),
 			};
 		}
 
@@ -49,6 +56,7 @@ export async function resolveRecommendationRepo(projectId: string): Promise<Reco
 				branch: gitlabInfo.branch,
 				source: 'project',
 				provider: 'gitlab',
+				webUrl: buildRepoWebUrl('gitlab', gitlabInfo.repoFullName),
 			};
 		}
 	}
@@ -57,7 +65,13 @@ export async function resolveRecommendationRepo(projectId: string): Promise<Reco
 	const configured = config?.repoFullName;
 	if (configured) {
 		const provider = config.repoProvider ?? 'github';
-		return { repoFullName: configured, branch: null, source: 'settings', provider };
+		return {
+			repoFullName: configured,
+			branch: null,
+			source: 'settings',
+			provider,
+			webUrl: buildRepoWebUrl(provider, configured),
+		};
 	}
 	return null;
 }
@@ -249,6 +263,7 @@ function resolvePullRequestRepo(projectId: string, edits: ProposedEdit[]): Promi
 		branch: target.branch,
 		source: 'linked',
 		provider: target.provider,
+		webUrl: buildRepoWebUrl(target.provider, target.repoFullName),
 	});
 }
 

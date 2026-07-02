@@ -193,6 +193,14 @@ export function cloneRepo(token: string, fullName: string, targetDir: string): v
 	});
 }
 
+export function removeOriginRemote(projectDir: string): void {
+	execFileSync('git', ['remote', 'remove', 'origin'], {
+		cwd: projectDir,
+		stdio: 'pipe',
+		timeout: 5_000,
+	});
+}
+
 export function getGitInfo(projectDir: string): GitInfo {
 	const empty: GitInfo = {
 		isGitRepo: false,

@@ -120,4 +120,25 @@ export const gitlabRoutes = {
 		}
 		return gitlabService.getGitInfo(ctx.project.path);
 	}),
+
+	unlinkProject: adminProtectedProcedure.mutation(async ({ ctx }) => {
+		if (!ctx.project.path) {
+			throw new TRPCError({ code: 'BAD_REQUEST', message: 'Project path not configured' });
+		}
+
+		const gitInfo = gitlabService.getGitInfo(ctx.project.path);
+		if (!gitInfo.isGitlab) {
+			throw new TRPCError({ code: 'BAD_REQUEST', message: 'This project is not linked to a GitLab repository' });
+		}
+
+		try {
+			gitlabService.removeOriginRemote(ctx.project.path);
+			return gitlabService.getGitInfo(ctx.project.path);
+		} catch (err) {
+			logger.error(`Failed to unlink GitLab repository: ${JSON.stringify(serializeError(err))}`, {
+				source: 'http',
+			});
+			throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to unlink repository' });
+		}
+	}),
 };

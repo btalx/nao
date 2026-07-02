@@ -68,12 +68,21 @@ export function RecommendationRepoCard() {
 		queryClient.invalidateQueries({ queryKey: trpc.contextRecommendation.getRepo.queryKey() });
 	};
 
-	const unlink = useMutation(
+	const unlinkGithub = useMutation(
 		trpc.github.unlinkProject.mutationOptions({
 			onSuccess: () => {
 				setConfirmUnlink(false);
 				invalidateRepo();
 				queryClient.invalidateQueries({ queryKey: trpc.github.getProjectGitInfo.queryKey() });
+			},
+		}),
+	);
+	const unlinkGitlab = useMutation(
+		trpc.gitlab.unlinkProject.mutationOptions({
+			onSuccess: () => {
+				setConfirmUnlink(false);
+				invalidateRepo();
+				queryClient.invalidateQueries({ queryKey: trpc.gitlab.getProjectGitInfo.queryKey() });
 			},
 		}),
 	);
@@ -193,9 +202,8 @@ export function RecommendationRepoCard() {
 		);
 	}
 
-	const { repoFullName, branch, source, provider } = repo.data;
-	const isGitlab = provider === 'gitlab';
-	const repoUrl = isGitlab ? `https://gitlab.com/${repoFullName}` : `https://github.com/${repoFullName}`;
+	const { repoFullName, branch, source, provider, webUrl } = repo.data;
+	const unlink = provider === 'gitlab' ? unlinkGitlab : unlinkGithub;
 
 	return (
 		<SettingsCard
@@ -210,7 +218,7 @@ export function RecommendationRepoCard() {
 			<div className='flex items-center justify-between gap-2 text-sm'>
 				<div className='flex items-center gap-2'>
 					<a
-						href={repoUrl}
+						href={webUrl}
 						target='_blank'
 						rel='noopener noreferrer'
 						className='font-mono text-foreground hover:underline'

@@ -62,6 +62,7 @@ vi.mock('../src/services/gitlab', () => ({
 	createMergeRequest: mocks.createMergeRequest,
 	getGitInfo: mocks.getGitInfo,
 	getUserGitIdentity: mocks.getUserGitIdentity,
+	gitlabBaseUrl: () => 'https://gitlab.com',
 }));
 
 describe('createRecommendationPullRequest (GitLab)', () => {
