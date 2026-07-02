@@ -227,7 +227,7 @@ export function getGitInfo(projectDir: string): GitInfo {
 	}
 }
 
-function escapeRegExp(str: string): string {
+export function escapeRegExp(str: string): string {
 	return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 

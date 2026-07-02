@@ -116,6 +116,39 @@ describe('createRecommendationPullRequest (GitLab)', () => {
 		);
 	});
 
+	it('opens linked GitLab repo edits against the upstream repository path', async () => {
+		mocks.getRecommendationById.mockResolvedValue(
+			recommendation([
+				edit({
+					path: 'repos/dbt-models/models/orders.sql',
+					targetRepo: {
+						repoFullName: 'nao/dbt-models',
+						branch: 'main',
+						path: 'models/orders.sql',
+						provider: 'gitlab',
+					},
+				}),
+			]),
+		);
+		mocks.cloneRepo.mockImplementation((_token: string, _repoFullName: string, dir: string) => {
+			fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
+			fs.writeFileSync(path.join(dir, 'models/orders.sql'), 'old');
+		});
+		mocks.commitAllAndPushBranch.mockImplementation(
+			({ dir, repoFullName }: { dir: string; repoFullName: string }) => {
+				expect(repoFullName).toBe('nao/dbt-models');
+				expect(fs.readFileSync(path.join(dir, 'models/orders.sql'), 'utf-8')).toBe('new');
+			},
+		);
+
+		await expect(createRecommendationPullRequest('project-1', 'rec-123456789', 'user-1')).resolves.toEqual({
+			branch: expect.stringMatching(/^nao\/context-rec-1234/),
+			url: 'https://gitlab.com/nao/context/-/merge_requests/1',
+		});
+
+		expect(mocks.cloneRepo).toHaveBeenCalledWith('gitlab-token', 'nao/dbt-models', expect.any(String));
+	});
+
 	it('rejects when GitLab token is not connected', async () => {
 		mocks.getRecommendationById.mockResolvedValue(recommendation());
 		mocks.getGitlabToken.mockResolvedValue(null);
@@ -132,7 +165,12 @@ describe('createRecommendationPullRequest (GitLab)', () => {
 				edit(),
 				edit({
 					path: 'repos/dbt-models/models/orders.sql',
-					targetRepo: { repoFullName: 'nao/dbt-models', branch: null, path: 'models/orders.sql' },
+					targetRepo: {
+						repoFullName: 'nao/dbt-models',
+						branch: null,
+						path: 'models/orders.sql',
+						provider: 'gitlab',
+					},
 				}),
 			]),
 		);

@@ -189,7 +189,7 @@ function resolveEditTarget(
 	}
 	if (!linkedRepo.repoFullName) {
 		throw new Error(
-			`"${filePath}" belongs to "${linkedRepo.contextPath}", which is not linked to a GitHub repository. ` +
+			`"${filePath}" belongs to "${linkedRepo.contextPath}", which is not linked to a GitHub or GitLab repository. ` +
 				'Call propose_manual_fix with guidance for the upstream source instead.',
 		);
 	}
@@ -204,6 +204,7 @@ function resolveEditTarget(
 			repoFullName: linkedRepo.repoFullName,
 			branch: linkedRepo.branch,
 			path: targetPath,
+			provider: linkedRepo.provider,
 		},
 	};
 }

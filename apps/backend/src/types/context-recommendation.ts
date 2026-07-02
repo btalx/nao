@@ -55,11 +55,12 @@ export interface RecommendationImpact {
 export const CONTEXT_RECOMMENDATION_FIX_KINDS = ['patch', 'manual'] as const;
 export type ContextRecommendationFixKind = (typeof CONTEXT_RECOMMENDATION_FIX_KINDS)[number];
 
-/** Set when an edit targets a linked GitHub repo instead of the context repo. */
+/** Set when an edit targets a linked GitHub or GitLab repo instead of the context repo. */
 export interface ProposedEditTargetRepo {
 	repoFullName: string;
 	branch: string | null;
 	path: string;
+	provider: 'github' | 'gitlab';
 }
 
 export interface ProposedEdit {
@@ -83,4 +84,5 @@ export interface LinkedContextRepo {
 	branch: string | null;
 	localPath: string | null;
 	repoFullName: string | null;
+	provider: 'github' | 'gitlab';
 }

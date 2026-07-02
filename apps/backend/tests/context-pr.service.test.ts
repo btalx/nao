@@ -91,7 +91,12 @@ describe('createRecommendationPullRequest', () => {
 			recommendation([
 				edit({
 					path: 'repos/dbt-models/models/orders.sql',
-					targetRepo: { repoFullName: 'nao/dbt-models', branch: 'main', path: 'models/orders.sql' },
+					targetRepo: {
+						repoFullName: 'nao/dbt-models',
+						branch: 'main',
+						path: 'models/orders.sql',
+						provider: 'github',
+					},
 				}),
 			]),
 		);
@@ -121,7 +126,12 @@ describe('createRecommendationPullRequest', () => {
 				edit(),
 				edit({
 					path: 'repos/dbt-models/models/orders.sql',
-					targetRepo: { repoFullName: 'nao/dbt-models', branch: null, path: 'models/orders.sql' },
+					targetRepo: {
+						repoFullName: 'nao/dbt-models',
+						branch: null,
+						path: 'models/orders.sql',
+						provider: 'github',
+					},
 				}),
 			]),
 		);

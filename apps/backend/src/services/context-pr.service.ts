@@ -243,8 +243,13 @@ function resolvePullRequestRepo(projectId: string, edits: ProposedEdit[]): Promi
 		throw new Error('A recommendation cannot mix context repository edits with linked repository edits.');
 	}
 
-	const [[repoFullName, targetRepo]] = targetRepos;
-	return Promise.resolve({ repoFullName, branch: targetRepo.branch, source: 'linked', provider: 'github' as const });
+	const [target] = targetRepos.values();
+	return Promise.resolve({
+		repoFullName: target.repoFullName,
+		branch: target.branch,
+		source: 'linked',
+		provider: target.provider,
+	});
 }
 
 function filterPullRequestEdits(edits: ProposedEdit[]): ProposedEdit[] {
