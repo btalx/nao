@@ -1,15 +1,14 @@
-import { useState } from 'react';
 import { createFileRoute, Outlet, redirect } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Github } from 'lucide-react';
 import { GitHubRepoPicker } from '@/components/settings/github-repo-picker';
 import { GitLabRepoPicker } from '@/components/settings/gitlab-repo-picker';
+import { ImportProviderCard } from '@/components/settings/import-provider-card';
 import GitlabIcon from '@/components/icons/gitlab-icon.svg';
 import { OrgApiKeys } from '@/components/settings/org-api-keys';
 import { SettingsProjectNav } from '@/components/settings/project-nav';
 import { usePermissions } from '@/hooks/use-permissions';
 import { queryClient, trpc } from '@/main';
-import { Button } from '@/components/ui/button';
 import { SettingsCard, SettingsPageWrapper } from '@/components/ui/settings-card';
 import { Empty } from '@/components/ui/empty';
 
@@ -64,8 +63,6 @@ function ProjectPage() {
 
 function NoProjectCloudState({ isAdmin }: { isAdmin: boolean }) {
 	const deployUrl = typeof window === 'undefined' ? '' : window.location.origin;
-	const [repoPickerOpen, setRepoPickerOpen] = useState(false);
-	const [gitlabPickerOpen, setGitlabPickerOpen] = useState(false);
 
 	const githubAvailable = useQuery(trpc.github.isAvailable.queryOptions());
 	const githubStatus = useQuery({
@@ -86,71 +83,27 @@ function NoProjectCloudState({ isAdmin }: { isAdmin: boolean }) {
 	return (
 		<div className='flex flex-col gap-6'>
 			{showGithubOption && (
-				<SettingsCard
-					title='Import from GitHub'
-					description={
-						isGithubConnected
-							? 'Select a repository to import as a nao project.'
-							: 'Connect your GitHub account to browse and import repositories.'
-					}
-					icon={<Github className='size-4' />}
-				>
-					{isGithubConnected ? (
-						<div className='flex items-center justify-between'>
-							<p className='text-sm text-muted-foreground'>
-								Browse your repositories and import one as a project.
-							</p>
-							<Button variant='secondary' size='sm' onClick={() => setRepoPickerOpen(true)}>
-								<Github className='size-3.5' />
-								Browse repositories
-							</Button>
-						</div>
-					) : (
-						<div className='flex items-center justify-between'>
-							<p className='text-sm text-muted-foreground'>GitHub is not connected yet.</p>
-							<Button variant='secondary' size='sm' asChild>
-								<a href='/api/github/connect'>
-									<Github className='size-3.5' />
-									Connect GitHub
-								</a>
-							</Button>
-						</div>
-					)}
-				</SettingsCard>
+				<ImportProviderCard
+					providerLabel='GitHub'
+					icon={Github}
+					connectHref='/api/github/connect'
+					resourceNounSingular='repository'
+					resourceNounPlural='repositories'
+					connected={isGithubConnected}
+					Picker={GitHubRepoPicker}
+				/>
 			)}
 
 			{showGitlabOption && (
-				<SettingsCard
-					title='Import from GitLab'
-					description={
-						isGitlabConnected
-							? 'Select a project to import as a nao project.'
-							: 'Connect your GitLab account to browse and import projects.'
-					}
-					icon={<GitlabIcon className='size-4' />}
-				>
-					{isGitlabConnected ? (
-						<div className='flex items-center justify-between'>
-							<p className='text-sm text-muted-foreground'>
-								Browse your projects and import one as a project.
-							</p>
-							<Button variant='secondary' size='sm' onClick={() => setGitlabPickerOpen(true)}>
-								<GitlabIcon className='size-3.5' />
-								Browse projects
-							</Button>
-						</div>
-					) : (
-						<div className='flex items-center justify-between'>
-							<p className='text-sm text-muted-foreground'>GitLab is not connected yet.</p>
-							<Button variant='secondary' size='sm' asChild>
-								<a href='/api/gitlab/connect'>
-									<GitlabIcon className='size-3.5' />
-									Connect GitLab
-								</a>
-							</Button>
-						</div>
-					)}
-				</SettingsCard>
+				<ImportProviderCard
+					providerLabel='GitLab'
+					icon={GitlabIcon}
+					connectHref='/api/gitlab/connect'
+					resourceNounSingular='project'
+					resourceNounPlural='projects'
+					connected={isGitlabConnected}
+					Picker={GitLabRepoPicker}
+				/>
 			)}
 
 			{isAdmin && (
@@ -175,9 +128,6 @@ function NoProjectCloudState({ isAdmin }: { isAdmin: boolean }) {
 					/>
 				</>
 			)}
-
-			<GitHubRepoPicker open={repoPickerOpen} onOpenChange={setRepoPickerOpen} />
-			<GitLabRepoPicker open={gitlabPickerOpen} onOpenChange={setGitlabPickerOpen} />
 		</div>
 	);
 }
