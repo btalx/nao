@@ -92,6 +92,13 @@ function GeneralPage() {
 	};
 
 	const handleDisconnectGitlab = async () => {
+		try {
+			await disconnectGitlab.mutateAsync();
+			await gitlabStatus.refetch();
+		} catch (error) {
+			console.error('Failed to disconnect GitLab:', error);
+		}
+	};
 		await disconnectGitlab.mutateAsync();
 		await gitlabStatus.refetch();
 	};
