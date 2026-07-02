@@ -308,9 +308,11 @@ app.setNotFoundHandler((request, reply) => {
 		reply.status(404).send({ error: 'Not found' });
 	} else if (staticRoot) {
 		reply.sendFile('index.html');
-	} else {
-		reply.redirect(`http://localhost:3000${request.url}`);
-	}
+} else if (isDev) {
+	reply.redirect(`http://localhost:3000${request.url}`);
+} else {
+	reply.status(404).send({ error: 'Not found' });
+}
 });
 
 export const startServer = async (opts: { port: number; host: string }) => {
