@@ -91,8 +91,8 @@ function parseRepoFullName(url: string): { repoFullName: string; provider: 'gith
 }
 
 function parseGithubRepoFullName(url: string): string | null {
-	const match = url.match(/github\.com[:/](.+?)(?:\.git)?(?:[#?].*)?$/i);
-	return match ? match[1] : null;
+	const match = url.match(/github\.com[:/]([^/\s]+)\/([^/\s#?]+?)(?:\.git)?(?:[#?].*)?$/i);
+	return match ? `${match[1]}/${match[2]}` : null;
 }
 
 function parseGitlabRepoFullName(url: string): string | null {
