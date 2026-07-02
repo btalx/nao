@@ -6,7 +6,7 @@ import type { DBContextRecommendation } from '../db/abstractSchema';
 import * as crQueries from '../queries/context-recommendation.queries';
 import * as projectQueries from '../queries/project.queries';
 import * as userQueries from '../queries/user.queries';
-import { ProposedEdit } from '../types/context-recommendation';
+import { ProposedEdit, ProposedEditTargetRepo } from '../types/context-recommendation';
 import { logger } from '../utils/logger';
 import { isHumanWritableContextPath } from '../utils/nao-context-paths';
 import * as github from './github';
@@ -226,10 +226,10 @@ function canOpenPullRequest(edits: ProposedEdit[], contextRepo: RecommendationRe
 }
 
 function resolvePullRequestRepo(projectId: string, edits: ProposedEdit[]): Promise<RecommendationRepo | null> {
-	const targetRepos = new Map<string, string | null>();
+	const targetRepos = new Map<string, ProposedEditTargetRepo>();
 	for (const edit of edits) {
 		if (edit.targetRepo) {
-			targetRepos.set(edit.targetRepo.repoFullName, edit.targetRepo.branch);
+			targetRepos.set(edit.targetRepo.repoFullName, edit.targetRepo);
 		}
 	}
 
@@ -243,8 +243,8 @@ function resolvePullRequestRepo(projectId: string, edits: ProposedEdit[]): Promi
 		throw new Error('A recommendation cannot mix context repository edits with linked repository edits.');
 	}
 
-	const [[repoFullName, branch]] = targetRepos;
-	return Promise.resolve({ repoFullName, branch, source: 'linked', provider: 'github' as const });
+	const [[repoFullName, targetRepo]] = targetRepos;
+	return Promise.resolve({ repoFullName, branch: targetRepo.branch, source: 'linked', provider: 'github' as const });
 }
 
 function filterPullRequestEdits(edits: ProposedEdit[]): ProposedEdit[] {
