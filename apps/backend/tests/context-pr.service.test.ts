@@ -56,7 +56,7 @@ vi.mock('../src/services/github', () => ({
 
 describe('createRecommendationPullRequest', () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
+		vi.resetAllMocks();
 		mocks.getProjectById.mockResolvedValue({ path: null });
 		mocks.getConfig.mockResolvedValue({ repoFullName: 'nao/context' });
 		mocks.getGithubToken.mockResolvedValue('github-token');

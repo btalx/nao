@@ -67,7 +67,7 @@ vi.mock('../src/services/gitlab', () => ({
 
 describe('createRecommendationPullRequest (GitLab)', () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
+		vi.resetAllMocks();
 		mocks.getProjectById.mockResolvedValue({ path: null });
 		mocks.getConfig.mockResolvedValue({ repoFullName: 'nao/context', repoProvider: 'gitlab' });
 		mocks.getGitlabToken.mockResolvedValue('gitlab-token');
