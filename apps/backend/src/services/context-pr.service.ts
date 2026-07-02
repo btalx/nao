@@ -41,7 +41,7 @@ export async function resolveRecommendationRepo(projectId: string): Promise<Reco
 				provider: 'github',
 			};
 		}
-
+		provider: target.provider ?? 'github',
 		const gitlabInfo = gitlab.getGitInfo(project.path);
 		if (gitlabInfo.isGitlab && gitlabInfo.repoFullName) {
 			return {
