@@ -98,6 +98,7 @@ export const githubRoutes = {
 						throw new TRPCError({
 							code: 'CONFLICT',
 							message: `A project named "${projectName}" already exists in this organization. Confirm replacement to import this repository over it.`,
+							cause: { conflictingProjectName: projectName },
 						});
 					}
 
