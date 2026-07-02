@@ -312,7 +312,7 @@ interface LinkedRepo {
 	branch: string | null;
 	url: string | null;
 	localPath: string | null;
-	provider: RepoProvider;
+	provider: RepoProvider | null;
 }
 
 function LinkedReposList({ repos }: { repos: LinkedRepo[] }) {

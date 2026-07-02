@@ -50,8 +50,16 @@ const envSchema = z.object({
 		.optional()
 		.default('false')
 		.transform((val) => val === 'true'),
-	GITLAB_BASE_URL: z.url({ message: 'GITLAB_BASE_URL must be a valid URL' }).optional(),
-	GITLAB_REDIRECT_URI: z.url({ message: 'GITLAB_REDIRECT_URI must be a valid URL' }).optional(),
+	GITLAB_BASE_URL: z
+		.string()
+		.optional()
+		.transform((val) => val?.trim() || undefined)
+		.pipe(z.url({ message: 'GITLAB_BASE_URL must be a valid URL' }).optional()),
+	GITLAB_REDIRECT_URI: z
+		.string()
+		.optional()
+		.transform((val) => val?.trim() || undefined)
+		.pipe(z.url({ message: 'GITLAB_REDIRECT_URI must be a valid URL' }).optional()),
 
 	AZURE_AD_CLIENT_ID: z.string().optional(),
 	AZURE_AD_CLIENT_SECRET: z.string().optional(),

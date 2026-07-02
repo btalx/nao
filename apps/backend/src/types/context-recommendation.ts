@@ -84,5 +84,6 @@ export interface LinkedContextRepo {
 	branch: string | null;
 	localPath: string | null;
 	repoFullName: string | null;
-	provider: 'github' | 'gitlab';
+	/** Only set when `repoFullName` is resolved from a recognized GitHub or GitLab URL. */
+	provider: 'github' | 'gitlab' | null;
 }

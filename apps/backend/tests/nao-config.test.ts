@@ -42,7 +42,7 @@ describe('extractConfiguredRepos', () => {
 					contextPath: 'repos/local-docs',
 					localPath: '../docs',
 					name: 'local-docs',
-					provider: 'github',
+					provider: null,
 					repoFullName: null,
 					url: null,
 				},
@@ -75,6 +75,35 @@ describe('extractConfiguredRepos', () => {
 					provider: 'gitlab',
 					repoFullName: 'nao/dbt-models',
 					url: 'https://gitlab.com/nao/dbt-models.git',
+				},
+			]);
+		} finally {
+			fs.rmSync(dir, { force: true, recursive: true });
+		}
+	});
+
+	it('leaves provider null when the repo url does not match a recognized host', () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nao-config-'));
+		try {
+			fs.writeFileSync(
+				path.join(dir, 'nao_config.yaml'),
+				[
+					'project_name: demo',
+					'repos:',
+					'  - name: dbt-models',
+					'    url: https://bitbucket.org/nao/dbt-models.git',
+				].join('\n'),
+			);
+
+			expect(extractConfiguredRepos(dir)).toEqual([
+				{
+					branch: null,
+					contextPath: 'repos/dbt-models',
+					localPath: null,
+					name: 'dbt-models',
+					provider: null,
+					repoFullName: null,
+					url: 'https://bitbucket.org/nao/dbt-models.git',
 				},
 			]);
 		} finally {

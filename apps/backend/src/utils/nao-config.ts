@@ -55,7 +55,7 @@ export function extractConfiguredRepos(projectFolder: string): LinkedContextRepo
 				branch,
 				localPath,
 				repoFullName: parsed?.repoFullName ?? null,
-				provider: parsed?.provider ?? 'github',
+				provider: parsed?.provider ?? null,
 			},
 		];
 	});
