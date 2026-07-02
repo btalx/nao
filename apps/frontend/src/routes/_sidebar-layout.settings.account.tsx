@@ -7,6 +7,7 @@ import type { UserRole } from '@nao/shared/types';
 import type { TeamMember } from '@/components/settings/team';
 import GitlabIcon from '@/components/icons/gitlab-icon.svg';
 import { EditMemberDialog } from '@/components/settings/team';
+import { ProviderConnectionCard } from '@/components/settings/provider-connection-card';
 import { NewsletterSubscribeInlineForm } from '@/components/newsletter-subscribe';
 import { signOut, useSession } from '@/lib/auth-client';
 import { SettingsVersionInfo } from '@/components/settings/version-info';
@@ -21,7 +22,6 @@ import { ToolCallDensitySlider } from '@/components/settings/tool-call-density-s
 import { DangerZone } from '@/components/settings/danger-zone';
 import { SettingsCard, SettingsPageWrapper } from '@/components/ui/settings-card';
 import { SettingsControlRow, SettingsToggleRow } from '@/components/ui/settings-toggle-row';
-import { Button } from '@/components/ui/button';
 import { trpc } from '@/main';
 
 export const Route = createFileRoute('/_sidebar-layout/settings/account')({
@@ -87,8 +87,12 @@ function GeneralPage() {
 	};
 
 	const handleDisconnectGithub = async () => {
-		await disconnectGithub.mutateAsync();
-		await githubStatus.refetch();
+		try {
+			await disconnectGithub.mutateAsync();
+			await githubStatus.refetch();
+		} catch (error) {
+			console.error('Failed to disconnect GitHub:', error);
+		}
 	};
 
 	const handleDisconnectGitlab = async () => {
@@ -139,93 +143,29 @@ function GeneralPage() {
 			</SettingsCard>
 
 			{githubAvailable.data === true && (
-				<SettingsCard
-					title='GitHub'
-					description='Connect the GitHub account automations can use for proactive actions.'
-					icon={<Github className='size-4' />}
-				>
-					{githubStatus.data?.connected ? (
-						<div className='flex items-center justify-between gap-4'>
-							<div className='flex items-center gap-3 min-w-0'>
-								{githubStatus.data.user.avatarUrl && (
-									<img
-										src={githubStatus.data.user.avatarUrl}
-										alt=''
-										className='size-8 rounded-full'
-									/>
-								)}
-								<div className='min-w-0'>
-									<div className='text-sm font-medium truncate'>{githubStatus.data.user.login}</div>
-									<div className='text-xs text-muted-foreground'>Connected</div>
-								</div>
-							</div>
-							<Button
-								variant='secondary'
-								size='sm'
-								onClick={handleDisconnectGithub}
-								disabled={disconnectGithub.isPending}
-							>
-								Disconnect
-							</Button>
-						</div>
-					) : (
-						<div className='flex items-center justify-between gap-4'>
-							<p className='text-sm text-muted-foreground'>GitHub is not connected yet.</p>
-							<Button variant='secondary' size='sm' asChild>
-								<a href='/api/github/connect?returnTo=/settings/account'>
-									<Github className='size-3.5' />
-									Connect GitHub
-								</a>
-							</Button>
-						</div>
-					)}
-				</SettingsCard>
+				<ProviderConnectionCard
+					providerLabel='GitHub'
+					icon={Github}
+					connectHref='/api/github/connect?returnTo=/settings/account'
+					connected={githubStatus.data?.connected === true}
+					username={githubStatus.data?.connected ? githubStatus.data.user.login : undefined}
+					avatarUrl={githubStatus.data?.connected ? githubStatus.data.user.avatarUrl : undefined}
+					onDisconnect={handleDisconnectGithub}
+					disconnectPending={disconnectGithub.isPending}
+				/>
 			)}
 
 			{gitlabAvailable.data === true && (
-				<SettingsCard
-					title='GitLab'
-					description='Connect the GitLab account automations can use for proactive actions.'
-					icon={<GitlabIcon className='size-4' />}
-				>
-					{gitlabStatus.data?.connected ? (
-						<div className='flex items-center justify-between gap-4'>
-							<div className='flex items-center gap-3 min-w-0'>
-								{gitlabStatus.data.user.avatarUrl && (
-									<img
-										src={gitlabStatus.data.user.avatarUrl}
-										alt=''
-										className='size-8 rounded-full'
-									/>
-								)}
-								<div className='min-w-0'>
-									<div className='text-sm font-medium truncate'>
-										{gitlabStatus.data.user.username}
-									</div>
-									<div className='text-xs text-muted-foreground'>Connected</div>
-								</div>
-							</div>
-							<Button
-								variant='secondary'
-								size='sm'
-								onClick={handleDisconnectGitlab}
-								disabled={disconnectGitlab.isPending}
-							>
-								Disconnect
-							</Button>
-						</div>
-					) : (
-						<div className='flex items-center justify-between gap-4'>
-							<p className='text-sm text-muted-foreground'>GitLab is not connected yet.</p>
-							<Button variant='secondary' size='sm' asChild>
-								<a href='/api/gitlab/connect?returnTo=/settings/account'>
-									<GitlabIcon className='size-3.5' />
-									Connect GitLab
-								</a>
-							</Button>
-						</div>
-					)}
-				</SettingsCard>
+				<ProviderConnectionCard
+					providerLabel='GitLab'
+					icon={GitlabIcon}
+					connectHref='/api/gitlab/connect?returnTo=/settings/account'
+					connected={gitlabStatus.data?.connected === true}
+					username={gitlabStatus.data?.connected ? gitlabStatus.data.user.username : undefined}
+					avatarUrl={gitlabStatus.data?.connected ? gitlabStatus.data.user.avatarUrl : undefined}
+					onDisconnect={handleDisconnectGitlab}
+					disconnectPending={disconnectGitlab.isPending}
+				/>
 			)}
 
 			{!isViewer && <DangerZone />}
