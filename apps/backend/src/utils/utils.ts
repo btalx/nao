@@ -25,11 +25,12 @@ export const getErrorMessage = (error: unknown): string | null => {
 	return String(error);
 };
 
+/** GitHub and GitLab usernames are case-insensitive, so entries are normalized to lowercase. */
 export const buildUsernameAllowlist = (allowedUsers?: string): Set<string> => {
 	const allowed = new Set<string>();
 	if (allowedUsers) {
 		for (const username of allowedUsers.split(',')) {
-			const trimmed = username.trim();
+			const trimmed = username.trim().toLowerCase();
 			if (trimmed) {
 				allowed.add(trimmed);
 			}

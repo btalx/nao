@@ -120,7 +120,7 @@ async function createAuthInstance(baseURL: string) {
 				});
 				const profile = await res.json();
 
-				if (githubAllowlist.size > 0 && !githubAllowlist.has(profile.login)) {
+				if (githubAllowlist.size > 0 && !githubAllowlist.has((profile.login as string).toLowerCase())) {
 					throw new APIError('FORBIDDEN', {
 						message: 'Your GitHub account is not authorized to access this application.',
 					});
@@ -149,7 +149,7 @@ async function createAuthInstance(baseURL: string) {
 			getUserInfo: async (token) => {
 				const profile = await gitlabService.getUser(token.accessToken!);
 
-				if (gitlabAllowlist.size > 0 && !gitlabAllowlist.has(profile.username)) {
+				if (gitlabAllowlist.size > 0 && !gitlabAllowlist.has(profile.username.toLowerCase())) {
 					throw new APIError('FORBIDDEN', {
 						message: 'Your GitLab account is not authorized to access this application.',
 					});
