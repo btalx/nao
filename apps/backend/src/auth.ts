@@ -283,6 +283,9 @@ async function createAuthInstance(baseURL: string) {
 								source: 'system',
 								context: { userId: user.id, error: serializeError(err) },
 							});
+							throw new APIError('INTERNAL_SERVER_ERROR', {
+								message: 'Account setup could not be completed. Please try again or contact support.',
+							});
 						}
 					},
 				},

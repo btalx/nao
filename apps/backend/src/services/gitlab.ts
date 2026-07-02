@@ -210,7 +210,6 @@ export function getGitInfo(projectDir: string): GitInfo {
 		const base = gitlabBaseUrl().replace(/^https?:\/\//, '');
 		const gitlabMatch = remoteUrl.match(new RegExp(`${escapeRegExp(base)}[/:](.+?)(?:\\.git)?$`, 'i'));
 
-
 		const branch = execSync('git rev-parse --abbrev-ref HEAD', opts).toString().trim();
 		const lastCommitMessage = execSync('git log -1 --format=%s', opts).toString().trim();
 		const lastCommitDate = execSync('git log -1 --format=%cI', opts).toString().trim();

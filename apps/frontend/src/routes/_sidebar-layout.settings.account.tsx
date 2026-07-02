@@ -99,9 +99,6 @@ function GeneralPage() {
 			console.error('Failed to disconnect GitLab:', error);
 		}
 	};
-		await disconnectGitlab.mutateAsync();
-		await gitlabStatus.refetch();
-	};
 
 	return (
 		<SettingsPageWrapper>
