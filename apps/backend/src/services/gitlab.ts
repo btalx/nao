@@ -330,8 +330,19 @@ export async function getMergeRequest(token: string, repoFullName: string, iid: 
 }
 
 export function parseMergeRequestUrl(url: string): { repo: string; iid: number } | null {
-	const base = gitlabBaseUrl().replace(/^https?:\/\//, '');
-	const match = url.match(new RegExp(`${escapeRegExp(base)}/(.+)/-/merge_requests/(\\d+)`));
+	let parsedUrl: URL;
+	let parsedBase: URL;
+	try {
+		parsedUrl = new URL(url);
+		parsedBase = new URL(gitlabBaseUrl());
+	} catch {
+		return null;
+	}
+	if (parsedUrl.protocol !== parsedBase.protocol || parsedUrl.host !== parsedBase.host) {
+		return null;
+	}
+
+	const match = parsedUrl.pathname.match(/^\/(.+)\/-\/merge_requests\/(\d+)$/);
 	if (!match) {
 		return null;
 	}
