@@ -103,7 +103,7 @@ export const isEmailDomainAllowed = (userEmail: string, authDomains?: string) =>
 		}
 		return allowedDomains.includes(userEmailDomain);
 	}
-	return true;
+	return false;
 };
 
 /**
