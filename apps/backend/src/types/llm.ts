@@ -36,6 +36,22 @@ export const customModelMetadataSchema = z.object({
 export type ModelCosts = z.infer<typeof customModelCostSchema>;
 export type CustomModelMetadata = z.infer<typeof customModelMetadataSchema>;
 
+export const reasoningEffortSchema = z.enum(['off', 'low', 'medium', 'high']);
+export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
+
+/** Per-model inference parameters an admin can tune, keyed by model id in `modelSettings`. */
+export const modelInferenceSettingsSchema = z.object({
+	temperature: z.number().min(0).max(2).optional(),
+	topP: z.number().min(0).max(1).optional(),
+	topK: z.number().int().min(1).optional(),
+	maxOutputTokens: z.number().int().min(1).optional(),
+	reasoningEffort: reasoningEffortSchema.optional(),
+});
+export type ModelInferenceSettings = z.infer<typeof modelInferenceSettingsSchema>;
+
+export const modelSettingsMapSchema = z.record(z.string(), modelInferenceSettingsSchema);
+export type ModelSettingsMap = z.infer<typeof modelSettingsMapSchema>;
+
 export const llmConfigSchema = z.object({
 	id: z.string(),
 	provider: llmProviderSchema,
@@ -43,6 +59,7 @@ export const llmConfigSchema = z.object({
 	credentialPreviews: z.record(z.string(), z.string()).nullable(),
 	enabledModels: z.array(z.string()).nullable(),
 	customModels: z.array(customModelMetadataSchema),
+	modelSettings: modelSettingsMapSchema,
 	baseUrl: z.string().url().nullable(),
 	createdAt: z.date(),
 	updatedAt: z.date(),

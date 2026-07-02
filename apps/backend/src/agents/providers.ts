@@ -11,7 +11,7 @@ import type { LlmProvider } from '@nao/shared/types';
 import { createOpenRouter, LanguageModelV3 } from '@openrouter/ai-sdk-provider';
 import { createOllama } from 'ai-sdk-ollama';
 
-import type { LlmProvidersType, ProviderConfigMap, ProviderSettings } from '../types/llm';
+import type { LlmProvidersType, ModelInferenceSettings, ProviderConfigMap, ProviderSettings } from '../types/llm';
 import { PROVIDER_META } from './provider-meta';
 
 export {
@@ -152,10 +152,20 @@ export const LLM_PROVIDERS: LlmProvidersType = {
 	},
 };
 
+/** Standard AI SDK call settings resolved from admin-tuned per-model parameters. */
+export type ModelCallSettings = {
+	temperature?: number;
+	topP?: number;
+	topK?: number;
+	maxOutputTokens?: number;
+};
+
 export type ProviderModelResult = {
 	model: LanguageModelV3;
 	providerOptions: Partial<{ [P in LlmProvider]: ProviderConfigMap[P] }>;
 	contextWindow: number;
+	/** Call settings resolved from admin per-model inference parameters, applied at the call site. */
+	callSettings?: ModelCallSettings;
 };
 
 /** Create a language model instance with merged provider options */
@@ -163,19 +173,83 @@ export function createProviderModel(
 	provider: LlmProvider,
 	settings: ProviderSettings,
 	modelId: string,
+	inferenceSettings?: ModelInferenceSettings,
 ): ProviderModelResult {
 	const providerConfig = LLM_PROVIDERS[provider];
 	const defaultOptions = providerConfig.defaultOptions ?? {};
 	const modelConfig = getProviderModelConfig(provider, modelId);
 	const contextWindow = providerConfig.models.find((m) => m.id === modelId)?.contextWindow ?? 200_000;
 
+	const { callSettings, providerOverrides } = resolveInferenceOptions(provider, inferenceSettings);
+
 	return {
 		model: providerConfig.create(settings, modelId),
 		providerOptions: {
-			[provider]: { ...defaultOptions, ...modelConfig },
+			[provider]: { ...defaultOptions, ...modelConfig, ...providerOverrides },
 		},
 		contextWindow,
+		callSettings,
 	};
+}
+
+/** Fallback output token ceiling used to clamp thinking budgets when a model has no explicit max. */
+const DEFAULT_MAX_OUTPUT_TOKENS = 16_000;
+
+/** Budget (in output tokens) granted to Anthropic extended thinking for each normalized effort level. */
+const ANTHROPIC_THINKING_BUDGET: Record<'low' | 'medium' | 'high', number> = {
+	low: 4_000,
+	medium: 8_000,
+	high: 12_000,
+};
+
+/**
+ * Translate normalized per-model inference settings into AI SDK call settings and
+ * provider-specific option overrides. Sampling parameters (temperature/topP/topK)
+ * are dropped for Anthropic when reasoning is enabled, since the Messages API rejects
+ * them alongside extended thinking.
+ */
+function resolveInferenceOptions(
+	provider: LlmProvider,
+	settings?: ModelInferenceSettings,
+): { callSettings?: ModelCallSettings; providerOverrides?: Record<string, unknown> } {
+	if (!settings) {
+		return {};
+	}
+
+	const reasoningEnabled = !!settings.reasoningEffort && settings.reasoningEffort !== 'off';
+	const providerOverrides =
+		provider === 'anthropic' && reasoningEnabled
+			? buildAnthropicThinking(settings.reasoningEffort as 'low' | 'medium' | 'high', settings.maxOutputTokens)
+			: undefined;
+
+	const callSettings: ModelCallSettings = {};
+	if (settings.maxOutputTokens !== undefined) {
+		callSettings.maxOutputTokens = settings.maxOutputTokens;
+	}
+	const dropSampling = provider === 'anthropic' && reasoningEnabled;
+	if (!dropSampling) {
+		if (settings.temperature !== undefined) {
+			callSettings.temperature = settings.temperature;
+		}
+		if (settings.topP !== undefined) {
+			callSettings.topP = settings.topP;
+		}
+		if (settings.topK !== undefined) {
+			callSettings.topK = settings.topK;
+		}
+	}
+
+	return {
+		callSettings: Object.keys(callSettings).length > 0 ? callSettings : undefined,
+		providerOverrides,
+	};
+}
+
+/** Budget-based extended thinking, clamped to stay below the effective output token limit. */
+function buildAnthropicThinking(effort: 'low' | 'medium' | 'high', maxOutputTokens?: number): AnthropicProviderOptions {
+	const ceiling = (maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS) - 2_048;
+	const budgetTokens = Math.max(1_024, Math.min(ANTHROPIC_THINKING_BUDGET[effort], ceiling));
+	return { thinking: { type: 'enabled', budgetTokens } };
 }
 
 function getProviderModelConfig<P extends LlmProvider>(provider: P, modelId: string): ProviderConfigMap[P] {

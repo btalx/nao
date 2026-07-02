@@ -122,6 +122,7 @@ export async function resolveProviderModel(
 				...(config.credentials && { credentials: config.credentials }),
 			},
 			modelId,
+			config.modelSettings?.[modelId],
 		);
 	}
 

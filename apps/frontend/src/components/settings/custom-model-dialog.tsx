@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { CustomModelMetadata } from '@nao/backend/llm';
+import { buildInferenceSettings, ModelParametersFields, seedParamFields } from './model-parameters-fields';
+import type { ParamFieldKey } from './model-parameters-fields';
+import type { CustomModelMetadata, ModelInferenceSettings, ReasoningEffort } from '@nao/backend/llm';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -10,6 +12,9 @@ interface CustomModelDialogProps {
 	modelId: string;
 	value: CustomModelMetadata | undefined;
 	onSave: (metadata: CustomModelMetadata) => void;
+	supportsModelParameters?: boolean;
+	parametersValue?: ModelInferenceSettings;
+	onSaveParameters?: (settings: ModelInferenceSettings) => void;
 }
 
 type CostKey = 'inputNoCache' | 'inputCacheRead' | 'inputCacheWrite' | 'output';
@@ -21,7 +26,16 @@ const COST_FIELDS: { key: CostKey; label: string; hint: string }[] = [
 	{ key: 'inputCacheWrite', label: 'Cache write', hint: 'Cached input tokens written' },
 ];
 
-export function CustomModelDialog({ open, onOpenChange, modelId, value, onSave }: CustomModelDialogProps) {
+export function CustomModelDialog({
+	open,
+	onOpenChange,
+	modelId,
+	value,
+	onSave,
+	supportsModelParameters = false,
+	parametersValue,
+	onSaveParameters,
+}: CustomModelDialogProps) {
 	const [displayName, setDisplayName] = useState('');
 	const [costs, setCosts] = useState<Record<CostKey, string>>({
 		inputNoCache: '',
@@ -29,6 +43,8 @@ export function CustomModelDialog({ open, onOpenChange, modelId, value, onSave }
 		inputCacheWrite: '',
 		output: '',
 	});
+	const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('off');
+	const [paramFields, setParamFields] = useState<Record<ParamFieldKey, string>>(seedParamFields(undefined));
 
 	useEffect(() => {
 		if (!open) {
@@ -41,7 +57,9 @@ export function CustomModelDialog({ open, onOpenChange, modelId, value, onSave }
 			inputCacheWrite: formatCost(value?.costPerM?.inputCacheWrite),
 			output: formatCost(value?.costPerM?.output),
 		});
-	}, [open, value]);
+		setReasoningEffort(parametersValue?.reasoningEffort ?? 'off');
+		setParamFields(seedParamFields(parametersValue));
+	}, [open, value, parametersValue]);
 
 	const handleSave = () => {
 		const costPerM = buildCostPerM(costs);
@@ -51,6 +69,9 @@ export function CustomModelDialog({ open, onOpenChange, modelId, value, onSave }
 			displayName: trimmedName || undefined,
 			costPerM,
 		});
+		if (supportsModelParameters) {
+			onSaveParameters?.(buildInferenceSettings(reasoningEffort, paramFields));
+		}
 		onOpenChange(false);
 	};
 
@@ -115,6 +136,18 @@ export function CustomModelDialog({ open, onOpenChange, modelId, value, onSave }
 							Leave a field empty to skip cost tracking for that token type.
 						</p>
 					</div>
+
+					{supportsModelParameters && (
+						<div className='grid gap-2 border-t border-border pt-4'>
+							<span className='text-sm font-medium text-foreground'>Model parameters</span>
+							<ModelParametersFields
+								reasoningEffort={reasoningEffort}
+								onReasoningEffortChange={setReasoningEffort}
+								fields={paramFields}
+								onFieldChange={(key, val) => setParamFields((prev) => ({ ...prev, [key]: val }))}
+							/>
+						</div>
+					)}
 				</div>
 
 				<div className='flex justify-end gap-2 pt-2'>

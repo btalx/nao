@@ -343,6 +343,7 @@ export const MAX_OUTPUT_TOKENS = 16_000;
 class AgentManager {
 	private readonly _agent: ToolLoopAgent<never, AgentTools, never>;
 	private _streamWriter?: UIMessageStreamWriter<UIMessage>;
+	private readonly _maxOutputTokens: number;
 
 	constructor(
 		readonly chat: AgentChat,
@@ -355,11 +356,16 @@ class AgentManager {
 		stopWhen: StopCondition<AgentTools>[] = [hasToolCall('suggest_follow_ups'), hasToolCall('clarification')],
 		private readonly _systemPromptOverride?: string,
 	) {
+		const callSettings = this._modelConfig.callSettings ?? {};
+		this._maxOutputTokens = callSettings.maxOutputTokens ?? MAX_OUTPUT_TOKENS;
 		this._agent = new ToolLoopAgent({
 			model: this._modelConfig.model,
 			providerOptions: this._modelConfig.providerOptions,
 			tools: this._agentTools,
-			maxOutputTokens: MAX_OUTPUT_TOKENS,
+			maxOutputTokens: this._maxOutputTokens,
+			...(callSettings.temperature !== undefined && { temperature: callSettings.temperature }),
+			...(callSettings.topP !== undefined && { topP: callSettings.topP }),
+			...(callSettings.topK !== undefined && { topK: callSettings.topK }),
 			prepareStep: async ({ messages }) => this._prepareStep(messages),
 			stopWhen,
 			experimental_context: this._toolContext,
@@ -372,7 +378,7 @@ class AgentManager {
 			provider: this._modelSelection.provider,
 			messages,
 			tools: this._agentTools,
-			maxOutputTokens: MAX_OUTPUT_TOKENS,
+			maxOutputTokens: this._maxOutputTokens,
 			contextWindow: this._modelConfig.contextWindow,
 			onCompactionStarted: () => {
 				this._streamWriter?.write({
