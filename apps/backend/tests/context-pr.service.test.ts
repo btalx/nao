@@ -34,6 +34,7 @@ vi.mock('../src/queries/project.queries', () => ({
 
 vi.mock('../src/queries/user.queries', () => ({
 	getGithubToken: mocks.getGithubToken,
+	getGitlabToken: vi.fn(),
 }));
 
 vi.mock('../src/utils/logger', () => ({

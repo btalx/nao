@@ -9,8 +9,67 @@ import * as userQueries from '../queries/user.queries';
 import { ProposedEdit, ProposedEditTargetRepo } from '../types/context-recommendation';
 import { logger } from '../utils/logger';
 import { isHumanWritableContextPath } from '../utils/nao-context-paths';
+import type { GitIdentity } from './github';
 import * as github from './github';
 import * as gitlab from './gitlab';
+
+/** Provider-specific glue for `createReviewRequest` — everything else about opening a PR/MR is identical. */
+interface ReviewRequestProvider {
+	getToken: (userId: string) => Promise<string | null>;
+	notConnectedMessage: string;
+	cloneRepo: (token: string, repoFullName: string, dir: string) => void;
+	getGitInfo: (dir: string) => { branch: string | null };
+	getUserGitIdentity: (token: string) => Promise<GitIdentity>;
+	coAuthor: GitIdentity;
+	commitAllAndPushBranch: (args: {
+		token: string;
+		repoFullName: string;
+		dir: string;
+		branch: string;
+		message: string;
+		author: GitIdentity;
+		coAuthors?: GitIdentity[];
+	}) => void;
+	openReviewRequest: (
+		token: string,
+		repoFullName: string,
+		args: { title: string; head: string; base: string; body: string },
+	) => Promise<{ url: string }>;
+}
+
+const REVIEW_REQUEST_PROVIDERS: Record<'github' | 'gitlab', ReviewRequestProvider> = {
+	github: {
+		getToken: userQueries.getGithubToken,
+		notConnectedMessage: 'GitHub is not connected. Connect your GitHub account first.',
+		cloneRepo: github.cloneRepo,
+		getGitInfo: github.getGitInfo,
+		getUserGitIdentity: github.getUserGitIdentity,
+		coAuthor: github.NAO_CO_AUTHOR,
+		commitAllAndPushBranch: github.commitAllAndPushBranch,
+		openReviewRequest: async (token, repoFullName, { title, head, base, body }) => {
+			const pr = await github.createPullRequest(token, repoFullName, { title, head, base, body });
+			return { url: pr.html_url };
+		},
+	},
+	gitlab: {
+		getToken: userQueries.getGitlabToken,
+		notConnectedMessage: 'GitLab is not connected. Connect your GitLab account first.',
+		cloneRepo: gitlab.cloneRepo,
+		getGitInfo: gitlab.getGitInfo,
+		getUserGitIdentity: gitlab.getUserGitIdentity,
+		coAuthor: gitlab.NAO_CO_AUTHOR,
+		commitAllAndPushBranch: gitlab.commitAllAndPushBranch,
+		openReviewRequest: async (token, repoFullName, { title, head, base, body }) => {
+			const mr = await gitlab.createMergeRequest(token, repoFullName, {
+				title,
+				source_branch: head,
+				target_branch: base,
+				description: body,
+			});
+			return { url: mr.web_url };
+		},
+	},
+};
 
 export interface CreatePullRequestResult {
 	url: string;
@@ -155,71 +214,20 @@ export async function createRecommendationPullRequest(
 	const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'nao-context-pr-'));
 
 	try {
-		if (repo.provider === 'gitlab') {
-			const token = await userQueries.getGitlabToken(userId);
-			if (!token) {
-				throw new Error('GitLab is not connected. Connect your GitLab account first.');
-			}
+		const { url } = await createReviewRequest({
+			provider: REVIEW_REQUEST_PROVIDERS[repo.provider],
+			userId,
+			repoFullName,
+			workdir,
+			branch,
+			configuredBase: repo.branch,
+			rec,
+			edits,
+		});
 
-			gitlab.cloneRepo(token, repoFullName, workdir);
-			const base = repo.branch ?? gitlab.getGitInfo(workdir).branch ?? 'main';
-
-			applyEdits(workdir, edits);
-
-			const author = await gitlab.getUserGitIdentity(token);
-			gitlab.commitAllAndPushBranch({
-				token,
-				repoFullName,
-				dir: workdir,
-				branch,
-				message: commitMessage(rec),
-				author,
-				coAuthors: [gitlab.NAO_CO_AUTHOR],
-			});
-
-			const mr = await gitlab.createMergeRequest(token, repoFullName, {
-				title: prTitle(rec),
-				source_branch: branch,
-				target_branch: base,
-				description: prBody(rec, edits),
-			});
-
-			const prCreatedAt = new Date();
-			await crQueries.setRecommendationPr(rec.id, { prUrl: mr.web_url, prBranch: branch, prCreatedAt });
-			return { url: mr.web_url, branch };
-		} else {
-			const token = await userQueries.getGithubToken(userId);
-			if (!token) {
-				throw new Error('GitHub is not connected. Connect your GitHub account first.');
-			}
-
-			github.cloneRepo(token, repoFullName, workdir);
-			const base = repo.branch ?? github.getGitInfo(workdir).branch ?? 'main';
-
-			applyEdits(workdir, edits);
-
-			const author = await github.getUserGitIdentity(token);
-			github.commitAllAndPushBranch({
-				token,
-				repoFullName,
-				dir: workdir,
-				branch,
-				message: commitMessage(rec),
-				author,
-				coAuthors: [github.NAO_CO_AUTHOR],
-			});
-
-			const pr = await github.createPullRequest(token, repoFullName, {
-				title: prTitle(rec),
-				head: branch,
-				base,
-				body: prBody(rec, edits),
-			});
-
-			const prCreatedAt = new Date();
-			await crQueries.setRecommendationPr(rec.id, { prUrl: pr.html_url, prBranch: branch, prCreatedAt });
-			return { url: pr.html_url, branch };
-		}
+		const prCreatedAt = new Date();
+		await crQueries.setRecommendationPr(rec.id, { prUrl: url, prBranch: branch, prCreatedAt });
+		return { url, branch };
 	} finally {
 		try {
 			fs.rmSync(workdir, { recursive: true, force: true });
@@ -227,6 +235,52 @@ export async function createRecommendationPullRequest(
 			logger.error(`Failed to clean up PR workdir ${workdir}: ${String(err)}`, { source: 'agent' });
 		}
 	}
+}
+
+/**
+ * Clones the repo, applies the edits as a commit on a new branch, pushes it, and opens the
+ * review request. Identical across providers except for the token lookup and how the review
+ * request itself is created — both captured by `provider`.
+ */
+async function createReviewRequest(args: {
+	provider: ReviewRequestProvider;
+	userId: string;
+	repoFullName: string;
+	workdir: string;
+	branch: string;
+	configuredBase: string | null;
+	rec: DBContextRecommendation;
+	edits: ProposedEdit[];
+}): Promise<{ url: string }> {
+	const { provider, userId, repoFullName, workdir, branch, configuredBase, rec, edits } = args;
+
+	const token = await provider.getToken(userId);
+	if (!token) {
+		throw new Error(provider.notConnectedMessage);
+	}
+
+	provider.cloneRepo(token, repoFullName, workdir);
+	const base = configuredBase ?? provider.getGitInfo(workdir).branch ?? 'main';
+
+	applyEdits(workdir, edits);
+
+	const author = await provider.getUserGitIdentity(token);
+	provider.commitAllAndPushBranch({
+		token,
+		repoFullName,
+		dir: workdir,
+		branch,
+		message: commitMessage(rec),
+		author,
+		coAuthors: [provider.coAuthor],
+	});
+
+	return provider.openReviewRequest(token, repoFullName, {
+		title: prTitle(rec),
+		head: branch,
+		base,
+		body: prBody(rec, edits),
+	});
 }
 
 /**
