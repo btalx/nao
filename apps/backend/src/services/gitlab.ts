@@ -50,7 +50,7 @@ export const NAO_CO_AUTHOR: GitIdentity = {
 	email: 'naoagent@getnao.io',
 };
 
-function gitlabBaseUrl(): string {
+export function gitlabBaseUrl(): string {
 	return env.GITLAB_BASE_URL?.replace(/\/$/, '') || 'https://gitlab.com';
 }
 

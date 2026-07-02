@@ -145,6 +145,7 @@ async function createAuthInstance(baseURL: string) {
 		socialProviders.gitlab = {
 			clientId: gitlabConfig.clientId,
 			clientSecret: gitlabConfig.clientSecret,
+			issuer: gitlabService.gitlabBaseUrl(),
 			getUserInfo: async (token) => {
 				const profile = await gitlabService.getUser(token.accessToken!);
 
@@ -154,7 +155,7 @@ async function createAuthInstance(baseURL: string) {
 					});
 				}
 
-				const hostname = new URL(env.GITLAB_BASE_URL?.replace(/\/$/, '') || 'https://gitlab.com').hostname;
+				const hostname = new URL(gitlabService.gitlabBaseUrl()).hostname;
 				return {
 					user: {
 						id: String(profile.id),
