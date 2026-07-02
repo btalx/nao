@@ -304,6 +304,7 @@ interface LinkedRepo {
 	branch: string | null;
 	url: string | null;
 	localPath: string | null;
+	provider: RepoProvider;
 }
 
 function LinkedReposList({ repos }: { repos: LinkedRepo[] }) {
@@ -318,9 +319,9 @@ function LinkedReposList({ repos }: { repos: LinkedRepo[] }) {
 					<div key={repo.name} className='flex flex-wrap items-center gap-x-1.5 gap-y-1'>
 						<span className='font-mono text-muted-foreground'>{repo.contextPath}/</span>
 						<span className='text-muted-foreground'>→</span>
-						{repo.repoFullName ? (
+						{repo.repoFullName && repo.url ? (
 							<a
-								href={`https://github.com/${repo.repoFullName}`}
+								href={repo.url}
 								target='_blank'
 								rel='noopener noreferrer'
 								className='font-mono text-foreground hover:underline'
