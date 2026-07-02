@@ -205,3 +205,6 @@ export type EmbedTokenPayload = {
 };
 
 export type StoryPanelDisplayMode = 'grid' | 'lines';
+
+export const REPO_PROVIDERS = ['github', 'gitlab'] as const;
+export type RepoProvider = (typeof REPO_PROVIDERS)[number];

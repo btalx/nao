@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { GitBranch, Github, Unlink } from 'lucide-react';
 import { useState } from 'react';
 
+import type { RepoProvider } from '@nao/shared/types';
+
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -31,8 +33,6 @@ import { trpc } from '@/main';
 
 const RETURN_TO = '/settings/recommendations';
 
-type Provider = 'github' | 'gitlab';
-
 /**
  * Surfaces the repository that gates automatic PR/MR drafting. The project's own GitHub
  * or GitLab remote is used when present; otherwise admins can pick any repository here.
@@ -41,7 +41,7 @@ export function RecommendationRepoCard() {
 	const queryClient = useQueryClient();
 	const [confirmUnlink, setConfirmUnlink] = useState(false);
 	const [pickerOpen, setPickerOpen] = useState(false);
-	const [pickerProvider, setPickerProvider] = useState<Provider>('github');
+	const [pickerProvider, setPickerProvider] = useState<RepoProvider>('github');
 
 	const githubAvailable = useQuery(trpc.github.isAvailable.queryOptions());
 	const gitlabAvailable = useQuery(trpc.gitlab.isAvailable.queryOptions());
@@ -347,7 +347,7 @@ function LinkedReposList({ repos }: { repos: LinkedRepo[] }) {
 
 interface RepoPickerDialogProps {
 	open: boolean;
-	provider: Provider;
+	provider: RepoProvider;
 	onOpenChange: (open: boolean) => void;
 	onConfirm: (repoFullName: string) => void;
 	isPending: boolean;
