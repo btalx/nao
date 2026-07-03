@@ -1,6 +1,11 @@
 import type { LlmProvider } from '@nao/shared/types';
 
-import type { ProviderAuth, ProviderMetaMap } from '../types/llm';
+import type { ModelCapabilities, ParamControl, ProviderAuth, ProviderMetaMap, ReasoningEffort } from '../types/llm';
+
+/** Modern Claude (sonnet-4-6+/opus-4-6+/fable-5): adaptive thinking driven by effort. */
+const ANTHROPIC_ADAPTIVE: ModelCapabilities = { thinking: 'adaptive', sampling: true, maxOutputTokens: true };
+/** Legacy Claude (4-5 era): extended thinking with an explicit token budget. */
+const ANTHROPIC_BUDGET: ModelCapabilities = { thinking: 'budget', sampling: true, maxOutputTokens: true };
 
 /** Provider metadata: models, auth config, env vars. No SDK imports — safe for frontend. */
 export const PROVIDER_META: ProviderMetaMap = {
@@ -16,18 +21,21 @@ export const PROVIDER_META: ProviderMetaMap = {
 				name: 'Claude Fable 5',
 				contextWindow: 300_000,
 				costPerM: { inputNoCache: 10, inputCacheRead: 1, inputCacheWrite: 12.5, output: 50 },
+				capabilities: ANTHROPIC_ADAPTIVE,
 			},
 			{
 				id: 'claude-opus-4-8',
 				name: 'Claude Opus 4.8',
 				contextWindow: 200_000,
 				costPerM: { inputNoCache: 5, inputCacheRead: 0.5, inputCacheWrite: 6.25, output: 25 },
+				capabilities: ANTHROPIC_ADAPTIVE,
 			},
 			{
 				id: 'claude-opus-4-7',
 				name: 'Claude Opus 4.7',
 				contextWindow: 200_000,
 				costPerM: { inputNoCache: 5, inputCacheRead: 0.5, inputCacheWrite: 6.25, output: 25 },
+				capabilities: ANTHROPIC_ADAPTIVE,
 			},
 			{
 				id: 'claude-sonnet-4-6',
@@ -35,30 +43,35 @@ export const PROVIDER_META: ProviderMetaMap = {
 				default: true,
 				contextWindow: 200_000,
 				costPerM: { inputNoCache: 3, inputCacheRead: 0.3, inputCacheWrite: 3.75, output: 15 },
+				capabilities: ANTHROPIC_ADAPTIVE,
 			},
 			{
 				id: 'claude-sonnet-4-5',
 				name: 'Claude Sonnet 4.5',
 				contextWindow: 200_000,
 				costPerM: { inputNoCache: 3, inputCacheRead: 0.3, inputCacheWrite: 3.75, output: 15 },
+				capabilities: ANTHROPIC_BUDGET,
 			},
 			{
 				id: 'claude-opus-4-6',
 				name: 'Claude Opus 4.6',
 				contextWindow: 200_000,
 				costPerM: { inputNoCache: 5, inputCacheRead: 0.5, inputCacheWrite: 6.25, output: 25 },
+				capabilities: ANTHROPIC_ADAPTIVE,
 			},
 			{
 				id: 'claude-opus-4-5',
 				name: 'Claude Opus 4.5',
 				contextWindow: 200_000,
 				costPerM: { inputNoCache: 5, inputCacheRead: 0.5, inputCacheWrite: 6.25, output: 25 },
+				capabilities: ANTHROPIC_BUDGET,
 			},
 			{
 				id: 'claude-haiku-4-5',
 				name: 'Claude Haiku 4.5',
 				contextWindow: 200_000,
 				costPerM: { inputNoCache: 1, inputCacheRead: 0.1, inputCacheWrite: 1.25, output: 5 },
+				capabilities: ANTHROPIC_BUDGET,
 			},
 		],
 	},
@@ -358,3 +371,85 @@ export function getProviderApiKeyRequirement(provider: LlmProvider): boolean {
 export const KNOWN_MODELS = Object.fromEntries(
 	Object.entries(PROVIDER_META).map(([provider, config]) => [provider, config.models]),
 ) as { [K in LlmProvider]: (typeof PROVIDER_META)[K]['models'] };
+
+/**
+ * Resolve the tunable-parameter capabilities for a model. Falls back to modern defaults for
+ * custom (unlisted) models on providers where per-model tuning is supported.
+ */
+export function getModelCapabilities(provider: LlmProvider, modelId: string): ModelCapabilities | undefined {
+	const known = PROVIDER_META[provider].models.find((m) => m.id === modelId);
+	if (known?.capabilities) {
+		return known.capabilities;
+	}
+	if (provider === 'anthropic') {
+		return ANTHROPIC_ADAPTIVE;
+	}
+	return undefined;
+}
+
+const EFFORT_OPTIONS: ReasoningEffort[] = ['off', 'low', 'medium', 'high', 'max'];
+
+/**
+ * Ordered list of editable inference-parameter controls for a model, derived from its
+ * capabilities. Drives the settings UI (render exactly this list, nothing hardcoded).
+ */
+export function getModelParameterSpec(provider: LlmProvider, modelId: string): ParamControl[] {
+	const caps = getModelCapabilities(provider, modelId);
+	if (!caps) {
+		return [];
+	}
+
+	const controls: ParamControl[] = [];
+
+	if (caps.thinking === 'adaptive') {
+		controls.push({ key: 'reasoningEffort', kind: 'effort', label: 'Thinking effort', options: EFFORT_OPTIONS });
+	} else if (caps.thinking === 'budget') {
+		controls.push({
+			key: 'thinkingBudgetTokens',
+			kind: 'number',
+			label: 'Thinking budget (tokens)',
+			placeholder: 'e.g. 8000',
+			step: 1024,
+			min: 1024,
+		});
+	}
+
+	if (caps.sampling) {
+		controls.push(
+			{
+				key: 'temperature',
+				kind: 'number',
+				label: 'Temperature',
+				placeholder: '0 – 2',
+				step: 0.1,
+				min: 0,
+				max: 2,
+				group: 'sampling',
+			},
+			{
+				key: 'topP',
+				kind: 'number',
+				label: 'Top P',
+				placeholder: '0 – 1',
+				step: 0.05,
+				min: 0,
+				max: 1,
+				group: 'sampling',
+			},
+			{ key: 'topK', kind: 'number', label: 'Top K', placeholder: 'e.g. 40', step: 1, min: 1, group: 'sampling' },
+		);
+	}
+
+	if (caps.maxOutputTokens) {
+		controls.push({
+			key: 'maxOutputTokens',
+			kind: 'number',
+			label: 'Max output tokens',
+			placeholder: 'e.g. 16000',
+			step: 1,
+			min: 1,
+		});
+	}
+
+	return controls;
+}

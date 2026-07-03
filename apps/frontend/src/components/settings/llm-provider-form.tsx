@@ -377,13 +377,13 @@ export function LlmProviderForm({
 							setEditingCustomModelId(null);
 						}
 					}}
+					provider={provider}
 					modelId={editingCustomModelId ?? ''}
 					value={field.state.value.find((m) => m.id === editingCustomModelId)}
 					onSave={(metadata) => {
 						const next = field.state.value.filter((m) => m.id !== metadata.id);
 						field.handleChange([...next, metadata]);
 					}}
-					supportsModelParameters={supportsModelParameters}
 					parametersValue={
 						editingCustomModelId ? form.getFieldValue('modelSettings')[editingCustomModelId] : undefined
 					}
@@ -413,6 +413,7 @@ export function LlmProviderForm({
 								setEditingModelParamsId(null);
 							}
 						}}
+						provider={provider}
 						model={{
 							id: editingModelParamsId ?? '',
 							name: model?.name ?? editingModelParamsId ?? '',

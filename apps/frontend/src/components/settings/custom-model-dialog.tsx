@@ -1,7 +1,14 @@
-import { useEffect, useState } from 'react';
-import { buildInferenceSettings, ModelParametersFields, seedParamFields } from './model-parameters-fields';
-import type { ParamFieldKey } from './model-parameters-fields';
-import type { CustomModelMetadata, ModelInferenceSettings, ReasoningEffort } from '@nao/backend/llm';
+import { useEffect, useMemo, useState } from 'react';
+import { getModelParameterSpec } from '@nao/backend/provider-meta';
+import {
+	buildInferenceSettings,
+	getParamErrors,
+	ModelParametersFields,
+	seedParamValues,
+} from './model-parameters-fields';
+import type { ParamValues } from './model-parameters-fields';
+import type { CustomModelMetadata, ModelInferenceSettings, ParamKey } from '@nao/backend/llm';
+import type { LlmProvider } from '@nao/shared/types';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -9,10 +16,10 @@ import { Input } from '@/components/ui/input';
 interface CustomModelDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
+	provider: LlmProvider;
 	modelId: string;
 	value: CustomModelMetadata | undefined;
 	onSave: (metadata: CustomModelMetadata) => void;
-	supportsModelParameters?: boolean;
 	parametersValue?: ModelInferenceSettings;
 	onSaveParameters?: (settings: ModelInferenceSettings) => void;
 }
@@ -29,13 +36,15 @@ const COST_FIELDS: { key: CostKey; label: string; hint: string }[] = [
 export function CustomModelDialog({
 	open,
 	onOpenChange,
+	provider,
 	modelId,
 	value,
 	onSave,
-	supportsModelParameters = false,
 	parametersValue,
 	onSaveParameters,
 }: CustomModelDialogProps) {
+	const controls = useMemo(() => (modelId ? getModelParameterSpec(provider, modelId) : []), [provider, modelId]);
+	const supportsModelParameters = controls.length > 0;
 	const [displayName, setDisplayName] = useState('');
 	const [costs, setCosts] = useState<Record<CostKey, string>>({
 		inputNoCache: '',
@@ -43,8 +52,7 @@ export function CustomModelDialog({
 		inputCacheWrite: '',
 		output: '',
 	});
-	const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('off');
-	const [paramFields, setParamFields] = useState<Record<ParamFieldKey, string>>(seedParamFields(undefined));
+	const [paramValues, setParamValues] = useState<ParamValues>({});
 
 	useEffect(() => {
 		if (!open) {
@@ -57,11 +65,16 @@ export function CustomModelDialog({
 			inputCacheWrite: formatCost(value?.costPerM?.inputCacheWrite),
 			output: formatCost(value?.costPerM?.output),
 		});
-		setReasoningEffort(parametersValue?.reasoningEffort ?? 'off');
-		setParamFields(seedParamFields(parametersValue));
-	}, [open, value, parametersValue]);
+		setParamValues(seedParamValues(controls, parametersValue));
+	}, [open, value, parametersValue, controls]);
+
+	const paramErrors = getParamErrors(controls, paramValues);
+	const hasParamErrors = Object.keys(paramErrors).length > 0;
 
 	const handleSave = () => {
+		if (hasParamErrors) {
+			return;
+		}
 		const costPerM = buildCostPerM(costs);
 		const trimmedName = displayName.trim();
 		onSave({
@@ -70,7 +83,7 @@ export function CustomModelDialog({
 			costPerM,
 		});
 		if (supportsModelParameters) {
-			onSaveParameters?.(buildInferenceSettings(reasoningEffort, paramFields));
+			onSaveParameters?.(buildInferenceSettings(controls, paramValues));
 		}
 		onOpenChange(false);
 	};
@@ -141,10 +154,12 @@ export function CustomModelDialog({
 						<div className='grid gap-2 border-t border-border pt-4'>
 							<span className='text-sm font-medium text-foreground'>Model parameters</span>
 							<ModelParametersFields
-								reasoningEffort={reasoningEffort}
-								onReasoningEffortChange={setReasoningEffort}
-								fields={paramFields}
-								onFieldChange={(key, val) => setParamFields((prev) => ({ ...prev, [key]: val }))}
+								controls={controls}
+								values={paramValues}
+								errors={paramErrors}
+								onValueChange={(key: ParamKey, val: string) =>
+									setParamValues((prev) => ({ ...prev, [key]: val }))
+								}
 							/>
 						</div>
 					)}
@@ -154,7 +169,7 @@ export function CustomModelDialog({
 					<Button variant='ghost' size='sm' onClick={() => onOpenChange(false)} type='button'>
 						Cancel
 					</Button>
-					<Button size='sm' onClick={handleSave} type='button'>
+					<Button size='sm' onClick={handleSave} type='button' disabled={hasParamErrors}>
 						Save
 					</Button>
 				</div>

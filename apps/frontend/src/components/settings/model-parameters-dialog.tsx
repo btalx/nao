@@ -1,32 +1,51 @@
-import { useEffect, useState } from 'react';
-import { buildInferenceSettings, ModelParametersFields, seedParamFields } from './model-parameters-fields';
-import type { ParamFieldKey } from './model-parameters-fields';
-import type { ModelInferenceSettings, ReasoningEffort } from '@nao/backend/llm';
+import { useEffect, useMemo, useState } from 'react';
+import { getModelParameterSpec } from '@nao/backend/provider-meta';
+import {
+	buildInferenceSettings,
+	getParamErrors,
+	ModelParametersFields,
+	seedParamValues,
+} from './model-parameters-fields';
+import type { ParamValues } from './model-parameters-fields';
+import type { ModelInferenceSettings, ParamKey } from '@nao/backend/llm';
+import type { LlmProvider } from '@nao/shared/types';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 interface ModelParametersDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
+	provider: LlmProvider;
 	model: { id: string; name: string };
 	value: ModelInferenceSettings | undefined;
 	onSave: (settings: ModelInferenceSettings) => void;
 }
 
-export function ModelParametersDialog({ open, onOpenChange, model, value, onSave }: ModelParametersDialogProps) {
-	const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('off');
-	const [fields, setFields] = useState<Record<ParamFieldKey, string>>(seedParamFields(undefined));
+export function ModelParametersDialog({
+	open,
+	onOpenChange,
+	provider,
+	model,
+	value,
+	onSave,
+}: ModelParametersDialogProps) {
+	const controls = useMemo(() => getModelParameterSpec(provider, model.id), [provider, model.id]);
+	const [values, setValues] = useState<ParamValues>({});
 
 	useEffect(() => {
-		if (!open) {
-			return;
+		if (open) {
+			setValues(seedParamValues(controls, value));
 		}
-		setReasoningEffort(value?.reasoningEffort ?? 'off');
-		setFields(seedParamFields(value));
-	}, [open, value]);
+	}, [open, controls, value]);
+
+	const errors = getParamErrors(controls, values);
+	const hasErrors = Object.keys(errors).length > 0;
 
 	const handleSave = () => {
-		onSave(buildInferenceSettings(reasoningEffort, fields));
+		if (hasErrors) {
+			return;
+		}
+		onSave(buildInferenceSettings(controls, values));
 		onOpenChange(false);
 	};
 
@@ -39,17 +58,17 @@ export function ModelParametersDialog({ open, onOpenChange, model, value, onSave
 				</DialogHeader>
 
 				<ModelParametersFields
-					reasoningEffort={reasoningEffort}
-					onReasoningEffortChange={setReasoningEffort}
-					fields={fields}
-					onFieldChange={(key, val) => setFields((prev) => ({ ...prev, [key]: val }))}
+					controls={controls}
+					values={values}
+					errors={errors}
+					onValueChange={(key: ParamKey, val: string) => setValues((prev) => ({ ...prev, [key]: val }))}
 				/>
 
 				<div className='flex justify-end gap-2 pt-2'>
 					<Button variant='ghost' size='sm' onClick={() => onOpenChange(false)} type='button'>
 						Cancel
 					</Button>
-					<Button size='sm' onClick={handleSave} type='button'>
+					<Button size='sm' onClick={handleSave} type='button' disabled={hasErrors}>
 						Save
 					</Button>
 				</div>

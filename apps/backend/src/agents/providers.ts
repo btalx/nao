@@ -11,8 +11,14 @@ import type { LlmProvider } from '@nao/shared/types';
 import { createOpenRouter, LanguageModelV3 } from '@openrouter/ai-sdk-provider';
 import { createOllama } from 'ai-sdk-ollama';
 
-import type { LlmProvidersType, ModelInferenceSettings, ProviderConfigMap, ProviderSettings } from '../types/llm';
-import { PROVIDER_META } from './provider-meta';
+import type {
+	LlmProvidersType,
+	ModelInferenceSettings,
+	ModelThinkingMode,
+	ProviderConfigMap,
+	ProviderSettings,
+} from '../types/llm';
+import { getModelCapabilities, PROVIDER_META } from './provider-meta';
 
 export {
 	getDefaultModelId,
@@ -180,7 +186,7 @@ export function createProviderModel(
 	const modelConfig = getProviderModelConfig(provider, modelId);
 	const contextWindow = providerConfig.models.find((m) => m.id === modelId)?.contextWindow ?? 200_000;
 
-	const { callSettings, providerOverrides } = resolveInferenceOptions(provider, inferenceSettings);
+	const { callSettings, providerOverrides } = resolveInferenceOptions(provider, modelId, inferenceSettings);
 
 	return {
 		model: providerConfig.create(settings, modelId),
@@ -192,41 +198,29 @@ export function createProviderModel(
 	};
 }
 
-/** Fallback output token ceiling used to clamp thinking budgets when a model has no explicit max. */
-const DEFAULT_MAX_OUTPUT_TOKENS = 16_000;
-
-/** Budget (in output tokens) granted to Anthropic extended thinking for each normalized effort level. */
-const ANTHROPIC_THINKING_BUDGET: Record<'low' | 'medium' | 'high', number> = {
-	low: 4_000,
-	medium: 8_000,
-	high: 12_000,
-};
-
 /**
  * Translate normalized per-model inference settings into AI SDK call settings and
- * provider-specific option overrides. Sampling parameters (temperature/topP/topK)
- * are dropped for Anthropic when reasoning is enabled, since the Messages API rejects
- * them alongside extended thinking.
+ * provider-specific option overrides, based on the model's declared capabilities.
+ * Sampling parameters (temperature/topP/topK) are dropped for Anthropic when thinking is
+ * active, since the Messages API rejects them alongside thinking.
  */
 function resolveInferenceOptions(
 	provider: LlmProvider,
+	modelId: string,
 	settings?: ModelInferenceSettings,
 ): { callSettings?: ModelCallSettings; providerOverrides?: Record<string, unknown> } {
 	if (!settings) {
 		return {};
 	}
 
-	const reasoningEnabled = !!settings.reasoningEffort && settings.reasoningEffort !== 'off';
-	const providerOverrides =
-		provider === 'anthropic' && reasoningEnabled
-			? buildAnthropicThinking(settings.reasoningEffort as 'low' | 'medium' | 'high', settings.maxOutputTokens)
-			: undefined;
+	const capabilities = getModelCapabilities(provider, modelId);
+	const { providerOverrides, thinkingActive } = resolveThinking(provider, capabilities?.thinking, settings);
 
 	const callSettings: ModelCallSettings = {};
 	if (settings.maxOutputTokens !== undefined) {
 		callSettings.maxOutputTokens = settings.maxOutputTokens;
 	}
-	const dropSampling = provider === 'anthropic' && reasoningEnabled;
+	const dropSampling = provider === 'anthropic' && thinkingActive;
 	if (!dropSampling) {
 		if (settings.temperature !== undefined) {
 			callSettings.temperature = settings.temperature;
@@ -245,11 +239,35 @@ function resolveInferenceOptions(
 	};
 }
 
-/** Budget-based extended thinking, clamped to stay below the effective output token limit. */
-function buildAnthropicThinking(effort: 'low' | 'medium' | 'high', maxOutputTokens?: number): AnthropicProviderOptions {
-	const ceiling = (maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS) - 2_048;
-	const budgetTokens = Math.max(1_024, Math.min(ANTHROPIC_THINKING_BUDGET[effort], ceiling));
-	return { thinking: { type: 'enabled', budgetTokens } };
+/**
+ * Map the normalized thinking settings onto the provider-specific thinking API that the given
+ * model actually supports. Modern Claude (adaptive) requires `thinking: { type: 'adaptive' }`
+ * plus an effort level; legacy Claude (budget) requires `thinking: { type: 'enabled', budgetTokens }`.
+ */
+function resolveThinking(
+	provider: LlmProvider,
+	thinkingMode: ModelThinkingMode | undefined,
+	settings: ModelInferenceSettings,
+): { providerOverrides?: AnthropicProviderOptions; thinkingActive: boolean } {
+	if (provider !== 'anthropic') {
+		return { thinkingActive: false };
+	}
+
+	if (thinkingMode === 'adaptive' && settings.reasoningEffort && settings.reasoningEffort !== 'off') {
+		return {
+			providerOverrides: { thinking: { type: 'adaptive' }, effort: settings.reasoningEffort },
+			thinkingActive: true,
+		};
+	}
+
+	if (thinkingMode === 'budget' && settings.thinkingBudgetTokens !== undefined) {
+		return {
+			providerOverrides: { thinking: { type: 'enabled', budgetTokens: settings.thinkingBudgetTokens } },
+			thinkingActive: true,
+		};
+	}
+
+	return { thinkingActive: false };
 }
 
 function getProviderModelConfig<P extends LlmProvider>(provider: P, modelId: string): ProviderConfigMap[P] {

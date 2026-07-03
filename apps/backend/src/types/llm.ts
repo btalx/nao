@@ -36,21 +36,58 @@ export const customModelMetadataSchema = z.object({
 export type ModelCosts = z.infer<typeof customModelCostSchema>;
 export type CustomModelMetadata = z.infer<typeof customModelMetadataSchema>;
 
-export const reasoningEffortSchema = z.enum(['off', 'low', 'medium', 'high']);
+export const reasoningEffortSchema = z.enum(['off', 'low', 'medium', 'high', 'max']);
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
 
-/** Per-model inference parameters an admin can tune, keyed by model id in `modelSettings`. */
+/**
+ * Superset of every per-model inference parameter an admin can tune, keyed by model id in
+ * `modelSettings`. A given model only exposes/uses the subset described by its capabilities
+ * (see `getModelParameterSpec`); the rest are ignored for that model.
+ */
 export const modelInferenceSettingsSchema = z.object({
 	temperature: z.number().min(0).max(2).optional(),
 	topP: z.number().min(0).max(1).optional(),
 	topK: z.number().int().min(1).optional(),
 	maxOutputTokens: z.number().int().min(1).optional(),
+	/** Adaptive-thinking effort level (modern Claude, OpenAI reasoning, ...). */
 	reasoningEffort: reasoningEffortSchema.optional(),
+	/** Legacy budget-based thinking token budget (older Claude models). */
+	thinkingBudgetTokens: z.number().int().min(1024).optional(),
 });
 export type ModelInferenceSettings = z.infer<typeof modelInferenceSettingsSchema>;
 
 export const modelSettingsMapSchema = z.record(z.string(), modelInferenceSettingsSchema);
 export type ModelSettingsMap = z.infer<typeof modelSettingsMapSchema>;
+
+/** How a model exposes "thinking"/reasoning control, if at all. */
+export type ModelThinkingMode = 'adaptive' | 'budget' | 'none';
+
+/** Declares which tunable inference parameters a model supports, driving both UI and translation. */
+export type ModelCapabilities = {
+	thinking: ModelThinkingMode;
+	/** Supports temperature / topP / topK sampling params. */
+	sampling: boolean;
+	/** Supports an explicit max output token limit. */
+	maxOutputTokens: boolean;
+};
+
+/** Keys of `ModelInferenceSettings` that can be surfaced as an editable control. */
+export type ParamKey = keyof ModelInferenceSettings;
+
+/** A single editable inference-parameter control, derived from a model's capabilities. */
+export type ParamControl =
+	| { key: 'reasoningEffort'; kind: 'effort'; label: string; options: ReasoningEffort[] }
+	| {
+			key: Exclude<ParamKey, 'reasoningEffort'>;
+			kind: 'number';
+			label: string;
+			placeholder: string;
+			step: number;
+			min?: number;
+			max?: number;
+			/** Sampling controls are disabled while thinking is active. */
+			group?: 'sampling';
+	  };
 
 export const llmConfigSchema = z.object({
 	id: z.string(),
@@ -89,6 +126,8 @@ type ProviderModel<P extends LlmProvider> = {
 	contextWindow?: number;
 	config?: ProviderConfigMap[P];
 	costPerM?: TokenCost;
+	/** Tunable inference parameters this model supports. Omit to expose no tunable parameters. */
+	capabilities?: ModelCapabilities;
 };
 
 /** An additional credential field (e.g. AWS Access Key ID) */
