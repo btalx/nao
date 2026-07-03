@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import type { RepoProvider } from '@nao/shared/types';
+
 import type { DBContextRecommendation } from '../db/abstractSchema';
 import * as crQueries from '../queries/context-recommendation.queries';
 import * as projectQueries from '../queries/project.queries';
@@ -42,7 +44,7 @@ interface ReviewRequestProvider {
 	) => Promise<{ url: string }>;
 }
 
-const REVIEW_REQUEST_PROVIDERS: Record<'github' | 'gitlab', ReviewRequestProvider> = {
+const REVIEW_REQUEST_PROVIDERS: Record<RepoProvider, ReviewRequestProvider> = {
 	github: {
 		getToken: userQueries.getGithubToken,
 		notConnectedMessage: 'GitHub is not connected. Connect your GitHub account first.',
@@ -85,11 +87,11 @@ export interface RecommendationRepo {
 	repoFullName: string;
 	branch: string | null;
 	source: 'project' | 'settings' | 'linked';
-	provider: 'github' | 'gitlab';
+	provider: RepoProvider;
 	webUrl: string;
 }
 
-function buildRepoWebUrl(provider: 'github' | 'gitlab', repoFullName: string): string {
+function buildRepoWebUrl(provider: RepoProvider, repoFullName: string): string {
 	const base = provider === 'gitlab' ? gitlab.gitlabBaseUrl() : 'https://github.com';
 	return `${base}/${repoFullName}`;
 }

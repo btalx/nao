@@ -1,6 +1,12 @@
 import type { McpChartEmbedStoredConfig } from '@nao/shared';
 import type { DisplaySettings } from '@nao/shared/date';
-import type { AnalyticsEventMetadata, CitationData, LlmProvider, UserPreferences } from '@nao/shared/types';
+import type {
+	AnalyticsEventMetadata,
+	CitationData,
+	LlmProvider,
+	RepoProvider,
+	UserPreferences,
+} from '@nao/shared/types';
 import {
 	ANALYTICS_ASSET_TYPES,
 	ANALYTICS_EVENT_TYPES,
@@ -644,7 +650,7 @@ export const contextRecommendationConfig = pgTable('context_recommendation_confi
 	frequency: text('frequency', { enum: CONTEXT_RECOMMENDATION_FREQUENCIES }),
 	customSystemPromptInstructions: text('custom_system_prompt_instructions'),
 	repoFullName: text('repo_full_name'),
-	repoProvider: text('repo_provider').$type<'github' | 'gitlab'>(),
+	repoProvider: text('repo_provider').$type<RepoProvider>(),
 	autoCreatePrs: boolean('auto_create_prs'),
 	maxAutoPrsPerRun: integer('max_auto_prs_per_run'),
 	createdAt: timestamp('created_at').defaultNow().notNull(),

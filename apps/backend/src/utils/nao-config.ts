@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import type { RepoProvider } from '@nao/shared/types';
 import yaml from 'js-yaml';
 
 import { escapeRegExp, gitlabBaseUrl } from '../services/gitlab';
@@ -76,7 +77,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function parseRepoFullName(url: string): { repoFullName: string; provider: 'github' | 'gitlab' } | null {
+function parseRepoFullName(url: string): { repoFullName: string; provider: RepoProvider } | null {
 	const githubRepoFullName = parseGithubRepoFullName(url);
 	if (githubRepoFullName) {
 		return { repoFullName: githubRepoFullName, provider: 'github' };

@@ -1,3 +1,5 @@
+import type { RepoProvider } from '@nao/shared/types';
+
 export const CONTEXT_RECOMMENDATION_RUN_STATUSES = ['running', 'completed', 'failed'] as const;
 export type ContextRecommendationRunStatus = (typeof CONTEXT_RECOMMENDATION_RUN_STATUSES)[number];
 
@@ -60,7 +62,7 @@ export interface ProposedEditTargetRepo {
 	repoFullName: string;
 	branch: string | null;
 	path: string;
-	provider: 'github' | 'gitlab';
+	provider: RepoProvider;
 }
 
 export interface ProposedEdit {
@@ -85,5 +87,5 @@ export interface LinkedContextRepo {
 	localPath: string | null;
 	repoFullName: string | null;
 	/** Only set when `repoFullName` is resolved from a recognized GitHub or GitLab URL. */
-	provider: 'github' | 'gitlab' | null;
+	provider: RepoProvider | null;
 }
