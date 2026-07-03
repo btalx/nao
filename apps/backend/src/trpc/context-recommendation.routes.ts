@@ -1,4 +1,4 @@
-import { LLM_PROVIDERS } from '@nao/shared/types';
+import { LLM_PROVIDERS, REPO_PROVIDERS } from '@nao/shared/types';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
@@ -99,7 +99,7 @@ export const contextRecommendationRoutes = {
 					.string()
 					.regex(/^[\w./-]+\/[\w.-]+$/, 'Expected a repository in "owner/name" format')
 					.nullable(),
-				provider: z.enum(['github', 'gitlab']).optional(),
+				provider: z.enum(REPO_PROVIDERS).optional(),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
