@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { Check, ChevronDown, MoreHorizontal, Plus, X } from 'lucide-react';
-import { getDefaultModelId, getProviderAuth } from '@nao/backend/provider-meta';
+import { getDefaultModelId, getModelParameterSpec, getProviderAuth } from '@nao/backend/provider-meta';
 import { CustomModelDialog } from './custom-model-dialog';
 import { ModelParametersDialog } from './model-parameters-dialog';
 import type { CustomModelMetadata, ModelSettingsMap } from '@nao/backend/llm';
@@ -56,7 +56,7 @@ export function LlmProviderForm({
 	const [customModelInput, setCustomModelInput] = useState('');
 	const [editingCustomModelId, setEditingCustomModelId] = useState<string | null>(null);
 	const [editingModelParamsId, setEditingModelParamsId] = useState<string | null>(null);
-	const supportsModelParameters = provider === 'anthropic';
+	const supportsModelParameters = (modelId: string) => getModelParameterSpec(provider, modelId).length > 0;
 	const providerAuth = getProviderAuth(provider);
 	const showApiKey = providerAuth.apiKey !== 'none';
 	const extraFields = providerAuth.extraFields ?? [];
@@ -205,7 +205,7 @@ export function LlmProviderForm({
 									const isDefaultSelected = enabledModels.length === 0 && model.default;
 									const isEnabled = isExplicitlyEnabled || isDefaultSelected;
 
-									if (supportsModelParameters && isEnabled) {
+									if (isEnabled && supportsModelParameters(model.id)) {
 										return (
 											<div
 												key={model.id}

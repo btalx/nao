@@ -10,6 +10,7 @@ import { convertToTokenUsage, findLastUserMessage, getLastUserMessageText, joinA
 import { debugMemory } from '../../utils/debug';
 import { truncateMiddle } from '../../utils/utils';
 import { type ProviderModelResult } from '../providers';
+import { llmTelemetry } from '../telemetry';
 
 interface MemoryExtractorResult {
 	output: ExtractorLLMOutput;
@@ -42,6 +43,7 @@ export class MemoryExtractorLLM {
 			output: Output.object({ schema: ExtractorOutputSchema }),
 			messages: modelMessages,
 			maxOutputTokens: 4000,
+			experimental_telemetry: llmTelemetry('nao-memory-extraction'),
 		});
 
 		debugMemory('output', output);

@@ -21,6 +21,7 @@ import { z } from 'zod';
 
 import { LLM_PROVIDERS, ProviderModelResult } from '../agents/providers';
 import { getSystemPromptOverride, hasNaoPromptPlaceholder, injectNaoPrompt } from '../agents/system-prompts';
+import { llmTelemetry } from '../agents/telemetry';
 import { getTools } from '../agents/tools';
 import { createWebSearchTools } from '../agents/tools/web-search';
 import { getConnections, getTableColumnsContent, getUserRules } from '../agents/user-rules';
@@ -358,6 +359,12 @@ class AgentManager {
 	) {
 		const callSettings = this._modelConfig.callSettings ?? {};
 		this._maxOutputTokens = callSettings.maxOutputTokens ?? MAX_OUTPUT_TOKENS;
+		const provider = this._modelSelection.provider;
+		// Sampling params (temperature/topP/topK/maxOutputTokens) also surface as
+		// gen_ai.request.* on the LLM span, but provider options (Anthropic
+		// thinking/effort) are not emitted by the AI SDK — so we attach the full
+		// resolved customization here to make it visible in the Langfuse trace.
+		const providerParams = this._modelConfig.providerOptions[provider];
 		this._agent = new ToolLoopAgent({
 			model: this._modelConfig.model,
 			providerOptions: this._modelConfig.providerOptions,
@@ -369,6 +376,19 @@ class AgentManager {
 			prepareStep: async ({ messages }) => this._prepareStep(messages),
 			stopWhen,
 			experimental_context: this._toolContext,
+			experimental_telemetry: llmTelemetry('nao-agent', {
+				sessionId: this.chat.id,
+				userId: this.chat.userId,
+				tags: [provider],
+				projectId: this.chat.projectId,
+				model: this._modelSelection.modelId,
+				...(callSettings.temperature !== undefined && { temperature: callSettings.temperature }),
+				...(callSettings.topP !== undefined && { topP: callSettings.topP }),
+				...(callSettings.topK !== undefined && { topK: callSettings.topK }),
+				...(callSettings.maxOutputTokens !== undefined && { maxOutputTokens: callSettings.maxOutputTokens }),
+				...(providerParams &&
+					Object.keys(providerParams).length > 0 && { providerOptions: JSON.stringify(providerParams) }),
+			}),
 		});
 	}
 
@@ -687,6 +707,11 @@ class AgentManager {
 				}),
 			}),
 			maxOutputTokens: 60,
+			experimental_telemetry: llmTelemetry('nao-generate-title', {
+				sessionId: this.chat.id,
+				userId: this.chat.userId,
+				tags: [provider],
+			}),
 		});
 
 		const title = output?.title.trim();

@@ -1,0 +1,222 @@
+import { describe, expect, it } from 'vitest';
+
+import { getModelCapabilities, getModelParameterSpec, isAnthropicApiModel } from '../src/agents/provider-meta';
+import type { ParamControl } from '../src/types/llm';
+
+describe('isAnthropicApiModel', () => {
+	it('matches all direct Anthropic models', () => {
+		expect(isAnthropicApiModel('anthropic', 'claude-sonnet-4-6')).toBe(true);
+		expect(isAnthropicApiModel('anthropic', 'any-custom-id')).toBe(true);
+	});
+
+	it('matches Claude on Vertex but not Gemini on Vertex', () => {
+		expect(isAnthropicApiModel('vertex', 'claude-sonnet-4-6')).toBe(true);
+		expect(isAnthropicApiModel('vertex', 'gemini-3-flash-preview')).toBe(false);
+	});
+
+	it('matches Claude on Bedrock but not other Bedrock models', () => {
+		expect(isAnthropicApiModel('bedrock', 'us.anthropic.claude-sonnet-4-6')).toBe(true);
+		expect(isAnthropicApiModel('bedrock', 'deepseek.v3.2')).toBe(false);
+	});
+
+	it('does not match other providers, even for Claude model ids', () => {
+		expect(isAnthropicApiModel('openai', 'gpt-5.5')).toBe(false);
+		expect(isAnthropicApiModel('openrouter', 'anthropic/claude-sonnet-4.5')).toBe(false);
+	});
+});
+
+describe('getModelCapabilities', () => {
+	it('returns the declared capabilities for known models', () => {
+		expect(getModelCapabilities('anthropic', 'claude-sonnet-4-6')).toMatchObject({
+			thinking: 'adaptive',
+			sampling: true,
+			topK: false,
+		});
+		expect(getModelCapabilities('anthropic', 'claude-sonnet-4-5')).toMatchObject({
+			thinking: 'budget',
+			topK: true,
+		});
+		expect(getModelCapabilities('openai', 'gpt-5.5')).toMatchObject({ thinking: 'adaptive', sampling: false });
+		expect(getModelCapabilities('openai', 'gpt-4.1')).toMatchObject({ thinking: 'none', sampling: true });
+	});
+
+	it('falls back to adaptive thinking for custom Anthropic models', () => {
+		expect(getModelCapabilities('anthropic', 'claude-future-6')).toMatchObject({
+			thinking: 'adaptive',
+			sampling: true,
+			topK: false,
+		});
+	});
+
+	it('falls back to reasoning capabilities for custom OpenAI and Azure models', () => {
+		const expected = { thinking: 'adaptive', sampling: false, topK: false };
+		expect(getModelCapabilities('openai', 'custom-model')).toMatchObject(expected);
+		expect(getModelCapabilities('azure', 'my-deployment')).toMatchObject(expected);
+	});
+
+	it('falls back to level-based thinking for custom Google models', () => {
+		expect(getModelCapabilities('google', 'gemini-future')).toMatchObject({
+			thinking: 'adaptive',
+			sampling: true,
+			topK: true,
+		});
+	});
+
+	it('falls back per model family for custom Vertex models', () => {
+		expect(getModelCapabilities('vertex', 'claude-custom')).toMatchObject({ thinking: 'adaptive', topK: false });
+		expect(getModelCapabilities('vertex', 'gemini-custom')).toMatchObject({ thinking: 'adaptive', topK: true });
+	});
+
+	it('falls back to effort-based reasoning for custom OpenRouter models', () => {
+		expect(getModelCapabilities('openrouter', 'some/custom-model')).toMatchObject({
+			thinking: 'adaptive',
+			sampling: true,
+			topK: true,
+		});
+	});
+
+	it('falls back to sampling-only for custom Mistral and Ollama models', () => {
+		expect(getModelCapabilities('mistral', 'custom-mistral')).toMatchObject({ thinking: 'none', sampling: true });
+		expect(getModelCapabilities('ollama', 'custom:1b')).toMatchObject({
+			thinking: 'none',
+			sampling: true,
+			topK: true,
+		});
+	});
+
+	it('falls back per model family for custom Bedrock models', () => {
+		expect(getModelCapabilities('bedrock', 'anthropic.claude-3-7-sonnet')).toMatchObject({
+			thinking: 'budget',
+			topK: true,
+		});
+		expect(getModelCapabilities('bedrock', 'meta.llama4')).toMatchObject({ thinking: 'none', sampling: true });
+	});
+});
+
+describe('getModelParameterSpec', () => {
+	function controlByKey(controls: ParamControl[], key: string) {
+		return controls.find((c) => c.key === key);
+	}
+
+	it('derives effort + exclusive sampling controls for adaptive Claude', () => {
+		const controls = getModelParameterSpec('anthropic', 'claude-sonnet-4-6');
+
+		expect(controls.map((c) => c.key)).toEqual([
+			'reasoningEffort',
+			'temperature',
+			'topP',
+			'maxOutputTokens',
+			'parallelToolCalls',
+			'sendReasoning',
+			'speed',
+			'inferenceGeo',
+		]);
+		expect(controlByKey(controls, 'reasoningEffort')).toMatchObject({
+			kind: 'effort',
+			options: ['off', 'low', 'medium', 'high', 'max'],
+		});
+		expect(controlByKey(controls, 'temperature')).toMatchObject({ max: 1, group: 'sampling' });
+		expect(controlByKey(controls, 'topP')).toMatchObject({ group: 'sampling', exclusiveWith: 'temperature' });
+		expect(controlByKey(controls, 'speed')).toMatchObject({ kind: 'select', options: ['standard', 'fast'] });
+	});
+
+	it('derives a budget control and topK for legacy Claude', () => {
+		const controls = getModelParameterSpec('anthropic', 'claude-sonnet-4-5');
+
+		expect(controls.map((c) => c.key)).toEqual([
+			'thinkingBudgetTokens',
+			'temperature',
+			'topP',
+			'topK',
+			'maxOutputTokens',
+			'parallelToolCalls',
+			'sendReasoning',
+			'speed',
+			'inferenceGeo',
+		]);
+		expect(controlByKey(controls, 'thinkingBudgetTokens')).toMatchObject({ kind: 'number', min: 1024 });
+		expect(controlByKey(controls, 'topK')).toMatchObject({ group: 'sampling' });
+	});
+
+	it('exposes effort, verbosity and tool/tier options for OpenAI reasoning models', () => {
+		const controls = getModelParameterSpec('openai', 'gpt-5.5');
+
+		expect(controls.map((c) => c.key)).toEqual([
+			'reasoningEffort',
+			'maxOutputTokens',
+			'textVerbosity',
+			'reasoningSummary',
+			'parallelToolCalls',
+			'maxToolCalls',
+			'serviceTier',
+		]);
+		expect(controlByKey(controls, 'reasoningEffort')).toMatchObject({
+			options: ['off', 'minimal', 'low', 'medium', 'high'],
+		});
+		expect(controlByKey(controls, 'serviceTier')).toMatchObject({
+			kind: 'select',
+			options: ['auto', 'default', 'flex', 'priority'],
+		});
+	});
+
+	it('exposes the full effort surface for custom OpenAI models', () => {
+		const controls = getModelParameterSpec('openai', 'gpt-6-codex-max');
+
+		expect(controlByKey(controls, 'reasoningEffort')).toMatchObject({
+			options: ['off', 'minimal', 'low', 'medium', 'high', 'max'],
+		});
+	});
+
+	it('exposes ungrouped sampling with temperature up to 2 for non-Claude models', () => {
+		const controls = getModelParameterSpec('openai', 'gpt-4.1');
+
+		expect(controls.map((c) => c.key)).toEqual([
+			'temperature',
+			'topP',
+			'maxOutputTokens',
+			'parallelToolCalls',
+			'maxToolCalls',
+			'serviceTier',
+		]);
+		expect(controlByKey(controls, 'temperature')).toMatchObject({ max: 2 });
+		expect(controlByKey(controls, 'temperature')).not.toHaveProperty('group');
+		expect(controlByKey(controls, 'topP')).not.toHaveProperty('exclusiveWith');
+	});
+
+	it('exposes the full control set for Gemini', () => {
+		const controls = getModelParameterSpec('google', 'gemini-3.1-pro-preview');
+
+		expect(controls.map((c) => c.key)).toEqual([
+			'reasoningEffort',
+			'temperature',
+			'topP',
+			'topK',
+			'maxOutputTokens',
+			'includeThoughts',
+			'safetyThreshold',
+			'mediaResolution',
+			'serviceTier',
+		]);
+		expect(controlByKey(controls, 'reasoningEffort')).toMatchObject({
+			options: ['off', 'low', 'medium', 'high'],
+		});
+		expect(controlByKey(controls, 'includeThoughts')).toMatchObject({ kind: 'boolean' });
+	});
+
+	it('offers minimal only on Gemini models that accept it', () => {
+		const flash = getModelParameterSpec('google', 'gemini-3-flash-preview');
+		const custom = getModelParameterSpec('google', 'gemini-9-experimental');
+
+		expect(controlByKey(flash, 'reasoningEffort')).toMatchObject({
+			options: ['off', 'minimal', 'low', 'medium', 'high'],
+		});
+		expect(controlByKey(custom, 'reasoningEffort')).toMatchObject({ options: ['off', 'low', 'high'] });
+	});
+
+	it('applies the Claude sampling rules to Claude on Bedrock', () => {
+		const controls = getModelParameterSpec('bedrock', 'us.anthropic.claude-sonnet-4-6');
+
+		expect(controlByKey(controls, 'temperature')).toMatchObject({ max: 1, group: 'sampling' });
+		expect(controlByKey(controls, 'topP')).toMatchObject({ exclusiveWith: 'temperature' });
+	});
+});

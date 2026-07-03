@@ -1,11 +1,166 @@
 import type { LlmProvider } from '@nao/shared/types';
 
-import type { ModelCapabilities, ParamControl, ProviderAuth, ProviderMetaMap, ReasoningEffort } from '../types/llm';
+import {
+	type ExtraParamKey,
+	mediaResolutionSchema,
+	type ModelCapabilities,
+	type ParamControl,
+	type ProviderAuth,
+	type ProviderMetaMap,
+	type ReasoningEffort,
+	safetyThresholdSchema,
+	type ServiceTier,
+} from '../types/llm';
 
-/** Modern Claude (sonnet-4-6+/opus-4-6+/fable-5): adaptive thinking driven by effort. */
-const ANTHROPIC_ADAPTIVE: ModelCapabilities = { thinking: 'adaptive', sampling: true, maxOutputTokens: true };
-/** Legacy Claude (4-5 era): extended thinking with an explicit token budget. */
-const ANTHROPIC_BUDGET: ModelCapabilities = { thinking: 'budget', sampling: true, maxOutputTokens: true };
+/** Claude effort vocabulary: no `minimal` (Anthropic's effort enum is low/medium/high/max). */
+const CLAUDE_EFFORTS: ReasoningEffort[] = ['off', 'low', 'medium', 'high', 'max'];
+/** Listed GPT-5.x models: `minimal` passthrough, no `xhigh` (only specific models like Codex-Max take it). */
+const OPENAI_LISTED_EFFORTS: ReasoningEffort[] = ['off', 'minimal', 'low', 'medium', 'high'];
+/** Gemini 3.x Pro thinking levels: no `minimal` (rejected with a 400), no `max` (would alias high). */
+const GEMINI_PRO_EFFORTS: ReasoningEffort[] = ['off', 'low', 'medium', 'high'];
+/** Gemini 3.x Flash thinking levels: full minimal/low/medium/high range. */
+const GEMINI_FLASH_EFFORTS: ReasoningEffort[] = ['off', 'minimal', 'low', 'medium', 'high'];
+/** Custom/unlisted Gemini models: only low/high are accepted by every thinking-level model. */
+const GEMINI_CUSTOM_EFFORTS: ReasoningEffort[] = ['off', 'low', 'high'];
+
+const OPENAI_TIERS: ServiceTier[] = ['auto', 'default', 'flex', 'priority'];
+const GOOGLE_TIERS: ServiceTier[] = ['standard', 'flex', 'priority'];
+const BEDROCK_TIERS: ServiceTier[] = ['default', 'reserved', 'priority', 'flex'];
+
+const ANTHROPIC_EXTRAS: ExtraParamKey[] = ['parallelToolCalls', 'sendReasoning', 'speed', 'inferenceGeo'];
+const OPENAI_REASONING_EXTRAS: ExtraParamKey[] = [
+	'textVerbosity',
+	'reasoningSummary',
+	'parallelToolCalls',
+	'maxToolCalls',
+	'serviceTier',
+];
+const OPENAI_SAMPLING_EXTRAS: ExtraParamKey[] = ['parallelToolCalls', 'maxToolCalls', 'serviceTier'];
+const GOOGLE_EXTRAS: ExtraParamKey[] = ['includeThoughts', 'safetyThreshold', 'mediaResolution', 'serviceTier'];
+const MISTRAL_EXTRAS: ExtraParamKey[] = ['safePrompt', 'parallelToolCalls', 'documentImageLimit', 'documentPageLimit'];
+const BEDROCK_EXTRAS: ExtraParamKey[] = ['serviceTier'];
+
+/** Modern Claude (sonnet-4-6+/opus-4-6+/fable-5): adaptive thinking driven by effort; topK deprecated. */
+const ANTHROPIC_ADAPTIVE: ModelCapabilities = {
+	thinking: 'adaptive',
+	sampling: true,
+	topK: false,
+	maxOutputTokens: true,
+	effortOptions: CLAUDE_EFFORTS,
+	extraParams: ANTHROPIC_EXTRAS,
+};
+/** Legacy Claude (4-5 era): extended thinking with an explicit token budget; still accepts topK. */
+const ANTHROPIC_BUDGET: ModelCapabilities = {
+	thinking: 'budget',
+	sampling: true,
+	topK: true,
+	maxOutputTokens: true,
+	extraParams: ANTHROPIC_EXTRAS,
+};
+
+/** OpenAI/Azure reasoning models (GPT-5.x): effort-driven thinking; the API rejects sampling params. */
+const OPENAI_REASONING: ModelCapabilities = {
+	thinking: 'adaptive',
+	sampling: false,
+	topK: false,
+	maxOutputTokens: true,
+	effortOptions: OPENAI_LISTED_EFFORTS,
+	extraParams: OPENAI_REASONING_EXTRAS,
+	serviceTierOptions: OPENAI_TIERS,
+};
+/** Custom/unlisted OpenAI reasoning models: full effort surface incl. xhigh (e.g. Codex-Max variants). */
+const OPENAI_REASONING_CUSTOM: ModelCapabilities = {
+	...OPENAI_REASONING,
+	effortOptions: undefined,
+};
+/** OpenAI/Azure non-reasoning models (GPT-4.1): sampling only, no topK, no reasoning-related options. */
+const OPENAI_SAMPLING: ModelCapabilities = {
+	thinking: 'none',
+	sampling: true,
+	topK: false,
+	maxOutputTokens: true,
+	extraParams: OPENAI_SAMPLING_EXTRAS,
+	serviceTierOptions: OPENAI_TIERS,
+};
+
+/** Gemini 3.x Pro: thinking driven by a discrete level (low/medium/high); full sampling incl. topK. */
+const GOOGLE_LEVEL_PRO: ModelCapabilities = {
+	thinking: 'adaptive',
+	sampling: true,
+	topK: true,
+	maxOutputTokens: true,
+	effortOptions: GEMINI_PRO_EFFORTS,
+	extraParams: GOOGLE_EXTRAS,
+	serviceTierOptions: GOOGLE_TIERS,
+};
+/** Gemini 3.x Flash: same as Pro but also accepts the `minimal` thinking level. */
+const GOOGLE_LEVEL_FLASH: ModelCapabilities = {
+	...GOOGLE_LEVEL_PRO,
+	effortOptions: GEMINI_FLASH_EFFORTS,
+};
+/** Custom/unlisted Gemini models: restrict to the levels every thinking-level model accepts. */
+const GOOGLE_LEVEL_CUSTOM: ModelCapabilities = {
+	...GOOGLE_LEVEL_PRO,
+	effortOptions: GEMINI_CUSTOM_EFFORTS,
+};
+/** Gemini 2.5: extended thinking with an explicit token budget; full sampling incl. topK. */
+const GOOGLE_BUDGET: ModelCapabilities = {
+	thinking: 'budget',
+	sampling: true,
+	topK: true,
+	maxOutputTokens: true,
+	extraParams: GOOGLE_EXTRAS,
+	serviceTierOptions: GOOGLE_TIERS,
+};
+
+/** Mistral chat models: sampling only (reasoning models would restrict effort to off/high). */
+const MISTRAL_SAMPLING: ModelCapabilities = {
+	thinking: 'none',
+	sampling: true,
+	topK: false,
+	maxOutputTokens: true,
+	extraParams: MISTRAL_EXTRAS,
+};
+
+/** OpenRouter: effort-driven reasoning normalized across models; sampling passes through incl. topK. */
+const OPENROUTER_EFFORT: ModelCapabilities = {
+	thinking: 'adaptive',
+	sampling: true,
+	topK: true,
+	maxOutputTokens: true,
+};
+
+/** Bedrock Claude 4.6+: adaptive thinking driven by effort; topK deprecated. */
+const BEDROCK_ADAPTIVE: ModelCapabilities = {
+	thinking: 'adaptive',
+	sampling: true,
+	topK: false,
+	maxOutputTokens: true,
+	effortOptions: CLAUDE_EFFORTS,
+	extraParams: BEDROCK_EXTRAS,
+	serviceTierOptions: BEDROCK_TIERS,
+};
+/** Bedrock legacy Claude: extended thinking with an explicit token budget. */
+const BEDROCK_BUDGET: ModelCapabilities = {
+	thinking: 'budget',
+	sampling: true,
+	topK: true,
+	maxOutputTokens: true,
+	extraParams: BEDROCK_EXTRAS,
+	serviceTierOptions: BEDROCK_TIERS,
+};
+/** Bedrock non-Claude models (DeepSeek, Mistral): sampling only. */
+const BEDROCK_SAMPLING: ModelCapabilities = {
+	thinking: 'none',
+	sampling: true,
+	topK: false,
+	maxOutputTokens: true,
+	extraParams: BEDROCK_EXTRAS,
+	serviceTierOptions: BEDROCK_TIERS,
+};
+
+/** Ollama local models: sampling + max output tokens (thinking is a model-creation setting, deferred). */
+const OLLAMA_SAMPLING: ModelCapabilities = { thinking: 'none', sampling: true, topK: true, maxOutputTokens: true };
 
 /** Provider metadata: models, auth config, env vars. No SDK imports — safe for frontend. */
 export const PROVIDER_META: ProviderMetaMap = {
@@ -88,30 +243,35 @@ export const PROVIDER_META: ProviderMetaMap = {
 				default: true,
 				contextWindow: 400_000,
 				costPerM: { inputNoCache: 5, inputCacheRead: 0.5, inputCacheWrite: 0, output: 30 },
+				capabilities: OPENAI_REASONING,
 			},
 			{
 				id: 'gpt-5.4',
 				name: 'GPT 5.4',
 				contextWindow: 400_000,
 				costPerM: { inputNoCache: 2.5, inputCacheRead: 0.25, inputCacheWrite: 0, output: 15 },
+				capabilities: OPENAI_REASONING,
 			},
 			{
 				id: 'gpt-5.2',
 				name: 'GPT 5.2',
 				contextWindow: 400_000,
 				costPerM: { inputNoCache: 1.75, inputCacheRead: 0.175, inputCacheWrite: 0, output: 14 },
+				capabilities: OPENAI_REASONING,
 			},
 			{
 				id: 'gpt-5-mini',
 				name: 'GPT 5 mini',
 				contextWindow: 400_000,
 				costPerM: { inputNoCache: 0.25, inputCacheRead: 0.025, inputCacheWrite: 0, output: 2 },
+				capabilities: OPENAI_REASONING,
 			},
 			{
 				id: 'gpt-4.1',
 				name: 'GPT 4.1',
 				contextWindow: 1_000_000,
 				costPerM: { inputNoCache: 3, inputCacheRead: 0.75, inputCacheWrite: 0, output: 12 },
+				capabilities: OPENAI_SAMPLING,
 			},
 		],
 	},
@@ -128,24 +288,28 @@ export const PROVIDER_META: ProviderMetaMap = {
 				default: true,
 				contextWindow: 1_000_000,
 				costPerM: { inputNoCache: 2, inputCacheRead: 0.2, inputCacheWrite: 0, output: 12 },
+				capabilities: GOOGLE_LEVEL_PRO,
 			},
 			{
 				id: 'gemini-3-flash-preview',
 				name: 'Gemini 3 Flash',
 				contextWindow: 1_000_000,
 				costPerM: { inputNoCache: 0.5, inputCacheRead: 0.05, inputCacheWrite: 0, output: 3 },
+				capabilities: GOOGLE_LEVEL_FLASH,
 			},
 			{
 				id: 'gemini-2.5-pro',
 				name: 'Gemini 2.5 Pro',
 				contextWindow: 1_000_000,
 				costPerM: { inputNoCache: 1.25, inputCacheRead: 0.125, inputCacheWrite: 0, output: 10 },
+				capabilities: GOOGLE_BUDGET,
 			},
 			{
 				id: 'gemini-2.5-flash',
 				name: 'Gemini 2.5 Flash',
 				contextWindow: 1_000_000,
 				costPerM: { inputNoCache: 0.3, inputCacheRead: 0.03, inputCacheWrite: 0, output: 2.5 },
+				capabilities: GOOGLE_BUDGET,
 			},
 		],
 	},
@@ -162,18 +326,21 @@ export const PROVIDER_META: ProviderMetaMap = {
 				default: true,
 				contextWindow: 128_000,
 				costPerM: { inputNoCache: 0.4, inputCacheRead: 0.4, inputCacheWrite: 0, output: 2 },
+				capabilities: MISTRAL_SAMPLING,
 			},
 			{
 				id: 'mistral-large-latest',
 				name: 'Mistral Large 3',
 				contextWindow: 256_000,
 				costPerM: { inputNoCache: 0.5, inputCacheRead: 0.5, inputCacheWrite: 0, output: 1.5 },
+				capabilities: MISTRAL_SAMPLING,
 			},
 			{
 				id: 'labs-leanstral-2603',
 				name: 'Leanstral',
 				contextWindow: 256_000,
 				costPerM: { inputNoCache: 0, inputCacheRead: 0, inputCacheWrite: 0, output: 0 },
+				capabilities: MISTRAL_SAMPLING,
 			},
 		],
 	},
@@ -190,24 +357,28 @@ export const PROVIDER_META: ProviderMetaMap = {
 				default: true,
 				contextWindow: 262_144,
 				costPerM: { inputNoCache: 0.5, inputCacheRead: 0.8, inputCacheWrite: 0, output: 2.25 },
+				capabilities: OPENROUTER_EFFORT,
 			},
 			{
 				id: 'deepseek/deepseek-v3.2',
 				name: 'DeepSeek V3.2',
 				contextWindow: 163_800,
 				costPerM: { inputNoCache: 0.26, inputCacheRead: 0.15, inputCacheWrite: 0, output: 0.4 },
+				capabilities: OPENROUTER_EFFORT,
 			},
 			{
 				id: 'anthropic/claude-sonnet-4.5',
 				name: 'Claude Sonnet 4.5 (OpenRouter)',
 				contextWindow: 1_000_000,
 				costPerM: { inputNoCache: 3, inputCacheRead: 0.3, inputCacheWrite: 3.75, output: 15 },
+				capabilities: OPENROUTER_EFFORT,
 			},
 			{
 				id: 'openai/gpt-5.2',
 				name: 'GPT 5.2 (OpenRouter)',
 				contextWindow: 400_000,
 				costPerM: { inputNoCache: 1.75, inputCacheRead: 0.175, inputCacheWrite: 0, output: 14 },
+				capabilities: OPENROUTER_EFFORT,
 			},
 		],
 	},
@@ -218,9 +389,9 @@ export const PROVIDER_META: ProviderMetaMap = {
 		extractorModelId: 'llama3.2:3b',
 		summaryModelId: 'llama3.2:3b',
 		models: [
-			{ id: 'qwen3:8b', name: 'Qwen 3 8B', default: true },
-			{ id: 'llama3.2:3b', name: 'Llama 3.2 3B' },
-			{ id: 'mistral:7b', name: 'Mistral 7B' },
+			{ id: 'qwen3:8b', name: 'Qwen 3 8B', default: true, capabilities: OLLAMA_SAMPLING },
+			{ id: 'llama3.2:3b', name: 'Llama 3.2 3B', capabilities: OLLAMA_SAMPLING },
+			{ id: 'mistral:7b', name: 'Mistral 7B', capabilities: OLLAMA_SAMPLING },
 		],
 	},
 	bedrock: {
@@ -256,21 +427,25 @@ export const PROVIDER_META: ProviderMetaMap = {
 				name: 'Claude Sonnet 4.6 (Bedrock US)',
 				default: true,
 				costPerM: { inputNoCache: 3, inputCacheRead: 0.3, inputCacheWrite: 3.75, output: 15 },
+				capabilities: BEDROCK_ADAPTIVE,
 			},
 			{
 				id: 'eu.anthropic.claude-opus-4-6-v1',
 				name: 'Claude Opus 4.6 (Bedrock EU)',
 				costPerM: { inputNoCache: 5, inputCacheRead: 0.5, inputCacheWrite: 6.25, output: 25 },
+				capabilities: BEDROCK_ADAPTIVE,
 			},
 			{
 				id: 'deepseek.v3.2',
 				name: 'DeepSeek V3.2 (Bedrock)',
 				costPerM: { inputNoCache: 0.62, inputCacheRead: 0.62, inputCacheWrite: 0, output: 1.85 },
+				capabilities: BEDROCK_SAMPLING,
 			},
 			{
 				id: 'mistral.devstral-2-123b',
 				name: 'Mistral 2 123B (Bedrock)',
 				costPerM: { inputNoCache: 0.4, inputCacheRead: 0.4, inputCacheWrite: 0, output: 2 },
+				capabilities: BEDROCK_SAMPLING,
 			},
 		],
 	},
@@ -318,6 +493,7 @@ export const PROVIDER_META: ProviderMetaMap = {
 				name: 'Gemini 3 Flash (Vertex)',
 				contextWindow: 200_000,
 				costPerM: { inputNoCache: 0.5, inputCacheRead: 0.05, inputCacheWrite: 0, output: 3 },
+				capabilities: GOOGLE_LEVEL_FLASH,
 			},
 		],
 	},
@@ -373,21 +549,58 @@ export const KNOWN_MODELS = Object.fromEntries(
 ) as { [K in LlmProvider]: (typeof PROVIDER_META)[K]['models'] };
 
 /**
- * Resolve the tunable-parameter capabilities for a model. Falls back to modern defaults for
- * custom (unlisted) models on providers where per-model tuning is supported.
+ * Whether a model is served through Anthropic's Messages API (directly, or Claude on Vertex/Bedrock).
+ * These share the sampling constraints: topP is ignored when temperature is set and all sampling
+ * params are rejected while thinking is active.
+ */
+export function isAnthropicApiModel(provider: LlmProvider, modelId: string): boolean {
+	if (provider === 'anthropic') {
+		return true;
+	}
+	if (provider === 'vertex') {
+		return modelId.startsWith('claude-');
+	}
+	if (provider === 'bedrock') {
+		return modelId.includes('claude');
+	}
+	return false;
+}
+
+/**
+ * Resolve the tunable-parameter capabilities for a model. Falls back to sensible per-provider
+ * defaults for custom (unlisted) models so tuning still works for user-added model ids.
  */
 export function getModelCapabilities(provider: LlmProvider, modelId: string): ModelCapabilities | undefined {
 	const known = PROVIDER_META[provider].models.find((m) => m.id === modelId);
 	if (known?.capabilities) {
 		return known.capabilities;
 	}
-	if (provider === 'anthropic') {
-		return ANTHROPIC_ADAPTIVE;
+	switch (provider) {
+		case 'anthropic':
+			return ANTHROPIC_ADAPTIVE;
+		case 'openai':
+		case 'azure':
+			return OPENAI_REASONING_CUSTOM;
+		case 'google':
+			return GOOGLE_LEVEL_CUSTOM;
+		case 'vertex':
+			return modelId.startsWith('claude-') ? ANTHROPIC_ADAPTIVE : GOOGLE_LEVEL_CUSTOM;
+		case 'openrouter':
+			return OPENROUTER_EFFORT;
+		case 'mistral':
+			return MISTRAL_SAMPLING;
+		case 'ollama':
+			return OLLAMA_SAMPLING;
+		case 'bedrock':
+			// Custom Claude ids default to budget-based thinking (supported across all Claude
+			// versions); adaptive+effort only exists on 4.6+, so it stays opt-in via known models.
+			return modelId.includes('claude') ? BEDROCK_BUDGET : BEDROCK_SAMPLING;
+		default:
+			return undefined;
 	}
-	return undefined;
 }
 
-const EFFORT_OPTIONS: ReasoningEffort[] = ['off', 'low', 'medium', 'high', 'max'];
+const EFFORT_OPTIONS: ReasoningEffort[] = ['off', 'minimal', 'low', 'medium', 'high', 'max'];
 
 /**
  * Ordered list of editable inference-parameter controls for a model, derived from its
@@ -402,7 +615,12 @@ export function getModelParameterSpec(provider: LlmProvider, modelId: string): P
 	const controls: ParamControl[] = [];
 
 	if (caps.thinking === 'adaptive') {
-		controls.push({ key: 'reasoningEffort', kind: 'effort', label: 'Thinking effort', options: EFFORT_OPTIONS });
+		controls.push({
+			key: 'reasoningEffort',
+			kind: 'effort',
+			label: 'Thinking effort',
+			options: caps.effortOptions ?? EFFORT_OPTIONS,
+		});
 	} else if (caps.thinking === 'budget') {
 		controls.push({
 			key: 'thinkingBudgetTokens',
@@ -415,16 +633,19 @@ export function getModelParameterSpec(provider: LlmProvider, modelId: string): P
 	}
 
 	if (caps.sampling) {
+		// Claude (direct or on Vertex/Bedrock) clamps temperature at 1, treats topP as mutually
+		// exclusive with temperature, and drops all sampling params while thinking is active.
+		const isClaude = isAnthropicApiModel(provider, modelId);
 		controls.push(
 			{
 				key: 'temperature',
 				kind: 'number',
 				label: 'Temperature',
-				placeholder: '0 – 2',
+				placeholder: isClaude ? '0 – 1' : '0 – 2',
 				step: 0.1,
 				min: 0,
-				max: 2,
-				group: 'sampling',
+				max: isClaude ? 1 : 2,
+				...(isClaude && { group: 'sampling' as const }),
 			},
 			{
 				key: 'topP',
@@ -434,10 +655,20 @@ export function getModelParameterSpec(provider: LlmProvider, modelId: string): P
 				step: 0.05,
 				min: 0,
 				max: 1,
-				group: 'sampling',
+				...(isClaude && { group: 'sampling' as const, exclusiveWith: 'temperature' as const }),
 			},
-			{ key: 'topK', kind: 'number', label: 'Top K', placeholder: 'e.g. 40', step: 1, min: 1, group: 'sampling' },
 		);
+		if (caps.topK) {
+			controls.push({
+				key: 'topK',
+				kind: 'number',
+				label: 'Top K',
+				placeholder: 'e.g. 40',
+				step: 1,
+				min: 1,
+				...(isClaude && { group: 'sampling' as const }),
+			});
+		}
 	}
 
 	if (caps.maxOutputTokens) {
@@ -451,5 +682,42 @@ export function getModelParameterSpec(provider: LlmProvider, modelId: string): P
 		});
 	}
 
+	for (const key of caps.extraParams ?? []) {
+		controls.push(buildExtraParamControl(key, caps));
+	}
+
 	return controls;
+}
+
+function buildExtraParamControl(key: ExtraParamKey, caps: ModelCapabilities): ParamControl {
+	switch (key) {
+		case 'textVerbosity':
+			return { key, kind: 'select', label: 'Text verbosity', options: ['low', 'medium', 'high'] };
+		case 'reasoningSummary':
+			return { key, kind: 'select', label: 'Reasoning summary', options: ['auto', 'detailed'] };
+		case 'parallelToolCalls':
+			return { key, kind: 'boolean', label: 'Parallel tool calls' };
+		case 'maxToolCalls':
+			return { key, kind: 'number', label: 'Max tool calls', placeholder: 'e.g. 20', step: 1, min: 1 };
+		case 'serviceTier':
+			return { key, kind: 'select', label: 'Service tier', options: caps.serviceTierOptions ?? [] };
+		case 'speed':
+			return { key, kind: 'select', label: 'Speed', options: ['standard', 'fast'] };
+		case 'inferenceGeo':
+			return { key, kind: 'select', label: 'Inference geography', options: ['us', 'global'] };
+		case 'sendReasoning':
+			return { key, kind: 'boolean', label: 'Send reasoning back' };
+		case 'includeThoughts':
+			return { key, kind: 'boolean', label: 'Include thoughts' };
+		case 'safetyThreshold':
+			return { key, kind: 'select', label: 'Safety threshold', options: safetyThresholdSchema.options };
+		case 'mediaResolution':
+			return { key, kind: 'select', label: 'Media resolution', options: mediaResolutionSchema.options };
+		case 'safePrompt':
+			return { key, kind: 'boolean', label: 'Safe prompt' };
+		case 'documentImageLimit':
+			return { key, kind: 'number', label: 'Document image limit', placeholder: 'e.g. 8', step: 1, min: 1 };
+		case 'documentPageLimit':
+			return { key, kind: 'number', label: 'Document page limit', placeholder: 'e.g. 64', step: 1, min: 1 };
+	}
 }

@@ -36,8 +36,27 @@ export const customModelMetadataSchema = z.object({
 export type ModelCosts = z.infer<typeof customModelCostSchema>;
 export type CustomModelMetadata = z.infer<typeof customModelMetadataSchema>;
 
-export const reasoningEffortSchema = z.enum(['off', 'low', 'medium', 'high', 'max']);
+export const reasoningEffortSchema = z.enum(['off', 'minimal', 'low', 'medium', 'high', 'max']);
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
+
+export const serviceTierSchema = z.enum(['auto', 'default', 'standard', 'flex', 'priority', 'reserved']);
+export type ServiceTier = z.infer<typeof serviceTierSchema>;
+
+export const safetyThresholdSchema = z.enum([
+	'HARM_BLOCK_THRESHOLD_UNSPECIFIED',
+	'BLOCK_LOW_AND_ABOVE',
+	'BLOCK_MEDIUM_AND_ABOVE',
+	'BLOCK_ONLY_HIGH',
+	'BLOCK_NONE',
+	'OFF',
+]);
+
+export const mediaResolutionSchema = z.enum([
+	'MEDIA_RESOLUTION_UNSPECIFIED',
+	'MEDIA_RESOLUTION_LOW',
+	'MEDIA_RESOLUTION_MEDIUM',
+	'MEDIA_RESOLUTION_HIGH',
+]);
 
 /**
  * Superset of every per-model inference parameter an admin can tune, keyed by model id in
@@ -53,6 +72,34 @@ export const modelInferenceSettingsSchema = z.object({
 	reasoningEffort: reasoningEffortSchema.optional(),
 	/** Legacy budget-based thinking token budget (older Claude models). */
 	thinkingBudgetTokens: z.number().int().min(1024).optional(),
+	/** OpenAI/Azure: response length/verbosity hint. */
+	textVerbosity: z.enum(['low', 'medium', 'high']).optional(),
+	/** OpenAI/Azure: reasoning summary detail level. */
+	reasoningSummary: z.enum(['auto', 'detailed']).optional(),
+	/** OpenAI/Azure/Mistral: allow parallel tool calls (Anthropic: inverse of disableParallelToolUse). */
+	parallelToolCalls: z.boolean().optional(),
+	/** OpenAI/Azure: cap on built-in tool calls per response. */
+	maxToolCalls: z.number().int().min(1).optional(),
+	/** OpenAI/Azure, Google/Vertex, Bedrock: processing tier (allowed values vary per provider). */
+	serviceTier: serviceTierSchema.optional(),
+	/** Anthropic: output speed mode (fast mode trades cost for latency). */
+	speed: z.enum(['standard', 'fast']).optional(),
+	/** Anthropic: inference geography / data residency. */
+	inferenceGeo: z.enum(['us', 'global']).optional(),
+	/** Anthropic: send previous reasoning blocks back to the model. */
+	sendReasoning: z.boolean().optional(),
+	/** Google/Vertex Gemini: include thought summaries in the response. */
+	includeThoughts: z.boolean().optional(),
+	/** Google/Vertex Gemini: harm-block threshold applied to all safety categories. */
+	safetyThreshold: safetyThresholdSchema.optional(),
+	/** Google/Vertex Gemini: resolution used for media inputs. */
+	mediaResolution: mediaResolutionSchema.optional(),
+	/** Mistral: inject the safety guardrail prompt. */
+	safePrompt: z.boolean().optional(),
+	/** Mistral: max images processed per document. */
+	documentImageLimit: z.number().int().min(1).optional(),
+	/** Mistral: max pages processed per document. */
+	documentPageLimit: z.number().int().min(1).optional(),
 });
 export type ModelInferenceSettings = z.infer<typeof modelInferenceSettingsSchema>;
 
@@ -62,23 +109,55 @@ export type ModelSettingsMap = z.infer<typeof modelSettingsMapSchema>;
 /** How a model exposes "thinking"/reasoning control, if at all. */
 export type ModelThinkingMode = 'adaptive' | 'budget' | 'none';
 
+/** Keys of `ModelInferenceSettings` that can be surfaced as an editable control. */
+export type ParamKey = keyof ModelInferenceSettings;
+
+/** Keys rendered as a numeric input. */
+export type NumberParamKey = {
+	[K in ParamKey]: NonNullable<ModelInferenceSettings[K]> extends number ? K : never;
+}[ParamKey];
+
+/** Keys rendered as an on/off/default control. */
+export type BooleanParamKey = {
+	[K in ParamKey]: NonNullable<ModelInferenceSettings[K]> extends boolean ? K : never;
+}[ParamKey];
+
+/** Keys rendered as an enum dropdown. */
+export type SelectParamKey = Exclude<
+	{
+		[K in ParamKey]: NonNullable<ModelInferenceSettings[K]> extends string ? K : never;
+	}[ParamKey],
+	'reasoningEffort'
+>;
+
+/** Provider-specific per-call options a model can additionally expose (beyond the core set). */
+export type ExtraParamKey = Exclude<
+	ParamKey,
+	'temperature' | 'topP' | 'topK' | 'maxOutputTokens' | 'reasoningEffort' | 'thinkingBudgetTokens'
+>;
+
 /** Declares which tunable inference parameters a model supports, driving both UI and translation. */
 export type ModelCapabilities = {
 	thinking: ModelThinkingMode;
-	/** Supports temperature / topP / topK sampling params. */
+	/** Supports temperature / topP sampling params. */
 	sampling: boolean;
+	/** Supports the topK sampling param (deprecated on newer Claude models). */
+	topK: boolean;
 	/** Supports an explicit max output token limit. */
 	maxOutputTokens: boolean;
+	/** Restrict the exposed reasoning-effort options (e.g. Mistral only supports off/high). */
+	effortOptions?: ReasoningEffort[];
+	/** Additional provider-specific per-call options this model supports. */
+	extraParams?: ExtraParamKey[];
+	/** Allowed service tiers, when `extraParams` includes `serviceTier` (values vary per provider). */
+	serviceTierOptions?: ServiceTier[];
 };
-
-/** Keys of `ModelInferenceSettings` that can be surfaced as an editable control. */
-export type ParamKey = keyof ModelInferenceSettings;
 
 /** A single editable inference-parameter control, derived from a model's capabilities. */
 export type ParamControl =
 	| { key: 'reasoningEffort'; kind: 'effort'; label: string; options: ReasoningEffort[] }
 	| {
-			key: Exclude<ParamKey, 'reasoningEffort'>;
+			key: NumberParamKey;
 			kind: 'number';
 			label: string;
 			placeholder: string;
@@ -87,7 +166,11 @@ export type ParamControl =
 			max?: number;
 			/** Sampling controls are disabled while thinking is active. */
 			group?: 'sampling';
-	  };
+			/** Disabled when the referenced param has a value (mutually exclusive settings). */
+			exclusiveWith?: NumberParamKey;
+	  }
+	| { key: SelectParamKey; kind: 'select'; label: string; options: readonly string[] }
+	| { key: BooleanParamKey; kind: 'boolean'; label: string };
 
 export const llmConfigSchema = z.object({
 	id: z.string(),

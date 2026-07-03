@@ -1,3 +1,6 @@
+import './env';
+import './instrumentation';
+
 import formbody from '@fastify/formbody';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
