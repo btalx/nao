@@ -28,6 +28,13 @@ const GOOGLE_TIERS: ServiceTier[] = ['standard', 'flex', 'priority'];
 const BEDROCK_TIERS: ServiceTier[] = ['default', 'reserved', 'priority', 'flex'];
 
 const ANTHROPIC_EXTRAS: ExtraParamKey[] = ['parallelToolCalls', 'sendReasoning', 'speed', 'inferenceGeo'];
+/**
+ * Claude on Vertex: `speed` (fast mode) and `inferenceGeo` are Anthropic-first-party request
+ * fields that Vertex's endpoint rejects. `sendReasoning` is an SDK-side prompt transform and
+ * `parallelToolCalls` maps to the Messages API `tool_choice.disable_parallel_tool_use` field,
+ * both of which Vertex accepts.
+ */
+const VERTEX_ANTHROPIC_EXTRAS: ExtraParamKey[] = ['parallelToolCalls', 'sendReasoning'];
 const OPENAI_REASONING_EXTRAS: ExtraParamKey[] = [
 	'textVerbosity',
 	'reasoningSummary',
@@ -58,6 +65,13 @@ const ANTHROPIC_BUDGET: ModelCapabilities = {
 	maxOutputTokens: true,
 	temperatureMax: 1,
 	extraParams: ANTHROPIC_EXTRAS,
+	maxOutputCap: 64_000,
+};
+
+/** Claude on Vertex: adaptive thinking like direct Anthropic, minus the 1P-only extras. */
+const VERTEX_ANTHROPIC_ADAPTIVE: ModelCapabilities = {
+	...ANTHROPIC_ADAPTIVE,
+	extraParams: VERTEX_ANTHROPIC_EXTRAS,
 };
 
 /** OpenAI/Azure reasoning models (GPT-5.x): effort-driven thinking; the API rejects sampling params. */
@@ -114,6 +128,16 @@ const GOOGLE_BUDGET: ModelCapabilities = {
 	extraParams: GOOGLE_EXTRAS,
 	serviceTierOptions: GOOGLE_TIERS,
 };
+/** Gemini 2.5 Pro: the API rejects thinkingBudget values outside 128–32768. */
+const GOOGLE_BUDGET_PRO: ModelCapabilities = {
+	...GOOGLE_BUDGET,
+	thinkingBudgetRange: { min: 128, max: 32_768 },
+};
+/** Gemini 2.5 Flash: the API rejects thinkingBudget values outside 0–24576. */
+const GOOGLE_BUDGET_FLASH: ModelCapabilities = {
+	...GOOGLE_BUDGET,
+	thinkingBudgetRange: { min: 0, max: 24_576 },
+};
 
 /** Mistral chat models: sampling only (reasoning models would restrict effort to off/high). */
 const MISTRAL_SAMPLING: ModelCapabilities = {
@@ -154,6 +178,7 @@ const BEDROCK_BUDGET: ModelCapabilities = {
 	temperatureMax: 1,
 	extraParams: BEDROCK_EXTRAS,
 	serviceTierOptions: BEDROCK_TIERS,
+	maxOutputCap: 64_000,
 };
 /** Bedrock non-Claude models (DeepSeek, Mistral): sampling only; the Converse API caps temperature at 1. */
 const BEDROCK_SAMPLING: ModelCapabilities = {
@@ -309,14 +334,14 @@ export const PROVIDER_META: ProviderMetaMap = {
 				name: 'Gemini 2.5 Pro',
 				contextWindow: 1_000_000,
 				costPerM: { inputNoCache: 1.25, inputCacheRead: 0.125, inputCacheWrite: 0, output: 10 },
-				capabilities: GOOGLE_BUDGET,
+				capabilities: GOOGLE_BUDGET_PRO,
 			},
 			{
 				id: 'gemini-2.5-flash',
 				name: 'Gemini 2.5 Flash',
 				contextWindow: 1_000_000,
 				costPerM: { inputNoCache: 0.3, inputCacheRead: 0.03, inputCacheWrite: 0, output: 2.5 },
-				capabilities: GOOGLE_BUDGET,
+				capabilities: GOOGLE_BUDGET_FLASH,
 			},
 		],
 	},
@@ -591,7 +616,7 @@ export function getModelCapabilities(provider: LlmProvider, modelId: string): Mo
 		case 'google':
 			return GOOGLE_LEVEL_CUSTOM;
 		case 'vertex':
-			return modelId.startsWith('claude-') ? ANTHROPIC_ADAPTIVE : GOOGLE_LEVEL_CUSTOM;
+			return modelId.startsWith('claude-') ? VERTEX_ANTHROPIC_ADAPTIVE : GOOGLE_LEVEL_CUSTOM;
 		case 'openrouter':
 			return OPENROUTER_EFFORT;
 		case 'mistral':
@@ -632,13 +657,17 @@ export function getModelParameterSpec(provider: LlmProvider, modelId: string): P
 			options: caps.effortOptions ?? EFFORT_OPTIONS,
 		});
 	} else if (caps.thinking === 'budget') {
+		const range = caps.thinkingBudgetRange;
 		controls.push({
 			key: 'thinkingBudgetTokens',
 			kind: 'number',
 			label: 'Thinking budget (tokens)',
 			placeholder: 'e.g. 8000',
 			step: 1024,
-			min: 1024,
+			// The stored-settings schema floors the budget at 1024 even when the API range starts lower.
+			min: Math.max(1024, range?.min ?? 1024),
+			...(range && { max: range.max }),
+			...(isAnthropicApiModel(provider, modelId) && { lessThan: 'maxOutputTokens' as const }),
 		});
 	}
 

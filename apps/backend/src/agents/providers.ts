@@ -265,6 +265,61 @@ function clampNumber(value: number, min: number, max: number): number {
 	return Math.min(Math.max(value, min), max);
 }
 
+/** Anthropic's minimum extended-thinking budget; below this the API rejects the request. */
+const MIN_THINKING_BUDGET = 1024;
+/**
+ * Output tokens reserved for the visible answer when fitting a thinking budget under a limit.
+ * One SDK-minimum-budget worth (1024) keeps `budget_tokens` strictly below the final
+ * `max_tokens` after the SDK clamps the summed value to the model's physical cap, while
+ * interfering as little as possible with the admin's stored budget.
+ */
+const THINKING_OUTPUT_RESERVE = 1024;
+
+function fitBudget(budget: number, limit: number | undefined): number | undefined {
+	if (limit === undefined) {
+		return budget;
+	}
+	const fitted = Math.min(budget, limit - THINKING_OUTPUT_RESERVE);
+	return fitted >= MIN_THINKING_BUDGET ? fitted : undefined;
+}
+
+/**
+ * Refit a resolved Claude thinking budget against the effective max output tokens of a specific
+ * call. The Anthropic and Bedrock SDKs send `max_tokens = maxOutputTokens + budgetTokens`, so
+ * call sites that override maxOutputTokens after model resolution (chat loop, memory extraction,
+ * compaction) apply this to keep the summed request within provider limits: the budget is
+ * clamped to leave `THINKING_OUTPUT_RESERVE` visible-output tokens under the call's max, and
+ * thinking is dropped entirely when the clamped budget would fall below Anthropic's minimum.
+ */
+export function fitThinkingBudget(
+	providerOptions: ProviderModelResult['providerOptions'],
+	maxOutputTokens: number,
+): ProviderModelResult['providerOptions'] {
+	const fitted = { ...providerOptions };
+
+	const anthropic = fitted.anthropic;
+	const thinking = anthropic?.thinking;
+	if (anthropic && thinking?.type === 'enabled' && thinking.budgetTokens !== undefined) {
+		const budget = fitBudget(thinking.budgetTokens, maxOutputTokens);
+		const rest = { ...anthropic };
+		delete rest.thinking;
+		fitted.anthropic =
+			budget === undefined ? rest : { ...rest, thinking: { type: 'enabled', budgetTokens: budget } };
+	}
+
+	const bedrock = fitted.bedrock;
+	const reasoning = bedrock?.reasoningConfig;
+	if (bedrock && reasoning?.type === 'enabled' && reasoning.budgetTokens !== undefined) {
+		const budget = fitBudget(reasoning.budgetTokens, maxOutputTokens);
+		const rest = { ...bedrock };
+		delete rest.reasoningConfig;
+		fitted.bedrock =
+			budget === undefined ? rest : { ...rest, reasoningConfig: { type: 'enabled', budgetTokens: budget } };
+	}
+
+	return fitted;
+}
+
 type ThinkingResult = { providerOverrides?: Record<string, unknown>; thinkingActive: boolean };
 
 const THINKING_INACTIVE: ThinkingResult = { thinkingActive: false };
@@ -351,8 +406,8 @@ function resolveThinking(
 
 	if (isAnthropicApiModel(provider, modelId)) {
 		return provider === 'bedrock'
-			? resolveBedrockThinking(mode, effort, settings)
-			: resolveAnthropicThinking(mode, effort, settings);
+			? resolveBedrockThinking(capabilities, effort, settings)
+			: resolveAnthropicThinking(capabilities, effort, settings);
 	}
 
 	switch (provider) {
@@ -365,7 +420,7 @@ function resolveThinking(
 			}));
 		case 'google':
 		case 'vertex':
-			return resolveGeminiThinking(mode, effort, settings);
+			return resolveGeminiThinking(capabilities, effort, settings);
 		case 'mistral':
 			return resolveEffortThinking(effort, () => ({ reasoningEffort: 'high' }));
 		default:
@@ -374,19 +429,23 @@ function resolveThinking(
 }
 
 function resolveAnthropicThinking(
-	mode: ModelCapabilities['thinking'],
+	capabilities: ModelCapabilities | undefined,
 	effort: ActiveEffort | undefined,
 	settings: ModelInferenceSettings,
 ): ThinkingResult {
-	if (mode === 'adaptive' && effort) {
+	if (capabilities?.thinking === 'adaptive' && effort) {
 		return {
 			providerOverrides: { thinking: { type: 'adaptive' }, effort: EFFORT_TO_ANTHROPIC[effort] },
 			thinkingActive: true,
 		};
 	}
-	if (mode === 'budget' && settings.thinkingBudgetTokens !== undefined) {
+	if (capabilities?.thinking === 'budget' && settings.thinkingBudgetTokens !== undefined) {
+		const budget = fitBudget(settings.thinkingBudgetTokens, capabilities.maxOutputCap);
+		if (budget === undefined) {
+			return THINKING_INACTIVE;
+		}
 		return {
-			providerOverrides: { thinking: { type: 'enabled', budgetTokens: settings.thinkingBudgetTokens } },
+			providerOverrides: { thinking: { type: 'enabled', budgetTokens: budget } },
 			thinkingActive: true,
 		};
 	}
@@ -394,11 +453,11 @@ function resolveAnthropicThinking(
 }
 
 function resolveBedrockThinking(
-	mode: ModelCapabilities['thinking'],
+	capabilities: ModelCapabilities | undefined,
 	effort: ActiveEffort | undefined,
 	settings: ModelInferenceSettings,
 ): ThinkingResult {
-	if (mode === 'adaptive' && effort) {
+	if (capabilities?.thinking === 'adaptive' && effort) {
 		return {
 			providerOverrides: {
 				reasoningConfig: { type: 'adaptive', maxReasoningEffort: EFFORT_TO_BEDROCK[effort] },
@@ -406,9 +465,13 @@ function resolveBedrockThinking(
 			thinkingActive: true,
 		};
 	}
-	if (mode === 'budget' && settings.thinkingBudgetTokens !== undefined) {
+	if (capabilities?.thinking === 'budget' && settings.thinkingBudgetTokens !== undefined) {
+		const budget = fitBudget(settings.thinkingBudgetTokens, capabilities.maxOutputCap);
+		if (budget === undefined) {
+			return THINKING_INACTIVE;
+		}
 		return {
-			providerOverrides: { reasoningConfig: { type: 'enabled', budgetTokens: settings.thinkingBudgetTokens } },
+			providerOverrides: { reasoningConfig: { type: 'enabled', budgetTokens: budget } },
 			thinkingActive: true,
 		};
 	}
@@ -416,19 +479,23 @@ function resolveBedrockThinking(
 }
 
 function resolveGeminiThinking(
-	mode: ModelCapabilities['thinking'],
+	capabilities: ModelCapabilities | undefined,
 	effort: ActiveEffort | undefined,
 	settings: ModelInferenceSettings,
 ): ThinkingResult {
-	if (mode === 'adaptive' && effort) {
+	if (capabilities?.thinking === 'adaptive' && effort) {
 		return {
 			providerOverrides: { thinkingConfig: { thinkingLevel: EFFORT_TO_GEMINI_LEVEL[effort] } },
 			thinkingActive: true,
 		};
 	}
-	if (mode === 'budget' && settings.thinkingBudgetTokens !== undefined) {
+	if (capabilities?.thinking === 'budget' && settings.thinkingBudgetTokens !== undefined) {
+		const range = capabilities.thinkingBudgetRange;
+		const budget = range
+			? clampNumber(settings.thinkingBudgetTokens, range.min, range.max)
+			: settings.thinkingBudgetTokens;
 		return {
-			providerOverrides: { thinkingConfig: { thinkingBudget: settings.thinkingBudgetTokens } },
+			providerOverrides: { thinkingConfig: { thinkingBudget: budget } },
 			thinkingActive: true,
 		};
 	}

@@ -153,6 +153,15 @@ export type ModelCapabilities = {
 	extraParams?: ExtraParamKey[];
 	/** Allowed service tiers, when `extraParams` includes `serviceTier` (values vary per provider). */
 	serviceTierOptions?: ServiceTier[];
+	/**
+	 * Provider-enforced physical max output tokens per request. For budget-thinking Claude the
+	 * SDK sends `max_tokens = maxOutputTokens + budgetTokens` capped at this limit, and the API
+	 * rejects the request when the budget is not strictly below the final max_tokens — so stored
+	 * budgets are clamped under this cap at request-build time.
+	 */
+	maxOutputCap?: number;
+	/** Budget-thinking Gemini: the thinkingBudget range the API accepts (out-of-range values are rejected). */
+	thinkingBudgetRange?: { min: number; max: number };
 };
 
 /** A single editable inference-parameter control, derived from a model's capabilities. */
@@ -170,6 +179,8 @@ export type ParamControl =
 			group?: 'sampling';
 			/** Disabled when the referenced param has a value (mutually exclusive settings). */
 			exclusiveWith?: NumberParamKey;
+			/** When both are set, this value must stay strictly below the referenced param's value. */
+			lessThan?: NumberParamKey;
 	  }
 	| { key: SelectParamKey; kind: 'select'; label: string; options: readonly string[] }
 	| { key: BooleanParamKey; kind: 'boolean'; label: string };

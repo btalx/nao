@@ -19,7 +19,7 @@ import {
 } from 'ai';
 import { z } from 'zod';
 
-import { LLM_PROVIDERS, ProviderModelResult } from '../agents/providers';
+import { fitThinkingBudget, LLM_PROVIDERS, ProviderModelResult } from '../agents/providers';
 import { getSystemPromptOverride, hasNaoPromptPlaceholder, injectNaoPrompt } from '../agents/system-prompts';
 import { llmTelemetry } from '../agents/telemetry';
 import { getTools } from '../agents/tools';
@@ -366,10 +366,11 @@ class AgentManager {
 		// resolved customization here to make it visible in the Langfuse trace.
 		// providerOptions has a single entry keyed by the SDK provider key (which
 		// can differ from our provider name, e.g. anthropic for Claude-on-Vertex).
-		const providerParams = Object.values(this._modelConfig.providerOptions)[0];
+		const providerOptions = fitThinkingBudget(this._modelConfig.providerOptions, this._maxOutputTokens);
+		const providerParams = Object.values(providerOptions)[0];
 		this._agent = new ToolLoopAgent({
 			model: this._modelConfig.model,
-			providerOptions: this._modelConfig.providerOptions,
+			providerOptions,
 			tools: this._agentTools,
 			maxOutputTokens: this._maxOutputTokens,
 			...(callSettings.temperature !== undefined && { temperature: callSettings.temperature }),

@@ -134,8 +134,34 @@ describe('getModelParameterSpec', () => {
 			'speed',
 			'inferenceGeo',
 		]);
-		expect(controlByKey(controls, 'thinkingBudgetTokens')).toMatchObject({ kind: 'number', min: 1024 });
+		expect(controlByKey(controls, 'thinkingBudgetTokens')).toMatchObject({
+			kind: 'number',
+			min: 1024,
+			lessThan: 'maxOutputTokens',
+		});
 		expect(controlByKey(controls, 'topK')).toMatchObject({ group: 'sampling' });
+	});
+
+	it('bounds the Gemini 2.5 thinking budget control to each model API range', () => {
+		const pro = getModelParameterSpec('google', 'gemini-2.5-pro');
+		const flash = getModelParameterSpec('google', 'gemini-2.5-flash');
+
+		expect(controlByKey(pro, 'thinkingBudgetTokens')).toMatchObject({ min: 1024, max: 32_768 });
+		expect(controlByKey(flash, 'thinkingBudgetTokens')).toMatchObject({ min: 1024, max: 24_576 });
+		expect(controlByKey(pro, 'thinkingBudgetTokens')).not.toHaveProperty('lessThan');
+	});
+
+	it('drops the Anthropic-first-party extras for Claude on Vertex', () => {
+		const listed = getModelParameterSpec('vertex', 'claude-sonnet-4-6');
+		const custom = getModelParameterSpec('vertex', 'claude-custom-model');
+
+		for (const controls of [listed, custom]) {
+			const keys = controls.map((c) => c.key);
+			expect(keys).not.toContain('speed');
+			expect(keys).not.toContain('inferenceGeo');
+			expect(keys).toContain('parallelToolCalls');
+			expect(keys).toContain('sendReasoning');
+		}
 	});
 
 	it('exposes effort, verbosity and tool/tier options for OpenAI reasoning models', () => {

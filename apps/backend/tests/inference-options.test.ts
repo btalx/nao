@@ -1,7 +1,7 @@
 import type { LlmProvider } from '@nao/shared/types';
 import { describe, expect, it } from 'vitest';
 
-import { createProviderModel } from '../src/agents/providers';
+import { createProviderModel, fitThinkingBudget } from '../src/agents/providers';
 import type { ModelInferenceSettings, ProviderSettings } from '../src/types/llm';
 
 const SETTINGS: ProviderSettings = { apiKey: 'test-key' };
@@ -347,6 +347,92 @@ describe('sampling bound clamps (stored values must never fail a request)', () =
 		const { callSettings } = resolve('google', 'gemini-3.1-pro-preview', { temperature: -1 });
 
 		expect(callSettings).toEqual({ temperature: 0 });
+	});
+});
+
+describe('thinking budget safety (stored budgets must never fail a request)', () => {
+	it('clamps a Claude budget to fit under the physical output cap with headroom', () => {
+		const { options } = resolve('anthropic', 'claude-sonnet-4-5', { thinkingBudgetTokens: 100_000 });
+
+		expect(options.thinking).toEqual({ type: 'enabled', budgetTokens: 62_976 });
+	});
+
+	it('keeps a Claude budget that already fits', () => {
+		const { options } = resolve('anthropic', 'claude-sonnet-4-5', { thinkingBudgetTokens: 8192 });
+
+		expect(options.thinking).toEqual({ type: 'enabled', budgetTokens: 8192 });
+	});
+
+	it('clamps a Bedrock Claude budget the same way', () => {
+		const { options } = resolve('bedrock', 'anthropic.claude-3-7-sonnet', { thinkingBudgetTokens: 100_000 });
+
+		expect(options.reasoningConfig).toEqual({ type: 'enabled', budgetTokens: 62_976 });
+	});
+
+	it('clamps the Gemini 2.5 Pro thinking budget at both ends of the API range', () => {
+		const low = resolve('google', 'gemini-2.5-pro', { thinkingBudgetTokens: 64 });
+		const high = resolve('google', 'gemini-2.5-pro', { thinkingBudgetTokens: 100_000 });
+
+		expect(low.options.thinkingConfig).toEqual({ thinkingBudget: 128 });
+		expect(high.options.thinkingConfig).toEqual({ thinkingBudget: 32_768 });
+	});
+
+	it('clamps the Gemini 2.5 Flash thinking budget to its own range', () => {
+		const { options } = resolve('google', 'gemini-2.5-flash', { thinkingBudgetTokens: 100_000 });
+
+		expect(options.thinkingConfig).toEqual({ thinkingBudget: 24_576 });
+	});
+});
+
+describe('fitThinkingBudget (per-call refit where call sites override maxOutputTokens)', () => {
+	it('clamps a huge stored Claude budget under an internal call cap', () => {
+		const { providerOptions } = createProviderModel('anthropic', SETTINGS, 'claude-sonnet-4-5', {
+			thinkingBudgetTokens: 32_000,
+		});
+
+		const fitted = fitThinkingBudget(providerOptions, 4000);
+
+		expect(fitted.anthropic?.thinking).toEqual({ type: 'enabled', budgetTokens: 2976 });
+	});
+
+	it('drops thinking entirely when the budget cannot fit above the 1024 floor', () => {
+		const { providerOptions } = createProviderModel('anthropic', SETTINGS, 'claude-sonnet-4-5', {
+			thinkingBudgetTokens: 32_000,
+		});
+
+		const fitted = fitThinkingBudget(providerOptions, 2000);
+
+		expect(fitted.anthropic).not.toHaveProperty('thinking');
+		expect(fitted.anthropic).toHaveProperty('contextManagement');
+	});
+
+	it('refits the Bedrock reasoningConfig the same way', () => {
+		const { providerOptions } = createProviderModel('bedrock', SETTINGS, 'anthropic.claude-3-7-sonnet', {
+			thinkingBudgetTokens: 32_000,
+			serviceTier: 'flex',
+		});
+
+		const clamped = fitThinkingBudget(providerOptions, 16_000);
+		const dropped = fitThinkingBudget(providerOptions, 2000);
+
+		expect(clamped.bedrock?.reasoningConfig).toEqual({ type: 'enabled', budgetTokens: 14_976 });
+		expect(dropped.bedrock).not.toHaveProperty('reasoningConfig');
+		expect(dropped.bedrock?.serviceTier).toBe('flex');
+	});
+
+	it('keeps a budget that already fits and leaves adaptive thinking untouched', () => {
+		const budget = createProviderModel('anthropic', SETTINGS, 'claude-sonnet-4-5', {
+			thinkingBudgetTokens: 8192,
+		});
+		const adaptive = createProviderModel('anthropic', SETTINGS, 'claude-sonnet-4-6', {
+			reasoningEffort: 'high',
+		});
+
+		expect(fitThinkingBudget(budget.providerOptions, 16_000).anthropic?.thinking).toEqual({
+			type: 'enabled',
+			budgetTokens: 8192,
+		});
+		expect(fitThinkingBudget(adaptive.providerOptions, 4000).anthropic?.thinking).toEqual({ type: 'adaptive' });
 	});
 });
 

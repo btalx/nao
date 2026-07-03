@@ -241,9 +241,36 @@ export function getParamErrors(controls: ParamControl[], values: ParamValues): P
 		const aboveMax = control.max !== undefined && parsed > control.max;
 		if (belowMin || aboveMax) {
 			errors[control.key] = boundsMessage(control.min, control.max);
+			continue;
+		}
+		const lessThanError = getLessThanError(controls, control, parsed, values);
+		if (lessThanError) {
+			errors[control.key] = lessThanError;
 		}
 	}
 	return errors;
+}
+
+function getLessThanError(
+	controls: ParamControl[],
+	control: NumberControl,
+	parsed: number,
+	values: ParamValues,
+): string | undefined {
+	if (control.lessThan === undefined) {
+		return undefined;
+	}
+	const otherRaw = (values[control.lessThan] ?? '').trim();
+	if (!otherRaw) {
+		return undefined;
+	}
+	const other = Number(otherRaw);
+	if (!Number.isFinite(other) || parsed < other) {
+		return undefined;
+	}
+	const otherControl = controls.find((c) => c.key === control.lessThan);
+	const otherLabel = otherControl?.kind === 'number' ? otherControl.label : control.lessThan;
+	return `Must be below ${otherLabel} (${other}).`;
 }
 
 function boundsMessage(min: number | undefined, max: number | undefined): string {
