@@ -112,6 +112,13 @@ describe('Anthropic (live-validated Claude rules)', () => {
 		expect(options.disableParallelToolUse).toBe(false);
 		expect(options).toHaveProperty('contextManagement');
 	});
+
+	it('clamps a stale minimal effort to low (not in the Claude vocabulary)', () => {
+		const { options } = resolve('anthropic', 'claude-sonnet-4-6', { reasoningEffort: 'minimal' });
+
+		expect(options.thinking).toEqual({ type: 'adaptive' });
+		expect(options.effort).toBe('low');
+	});
 });
 
 describe('OpenAI / Azure', () => {
@@ -251,6 +258,12 @@ describe('OpenRouter', () => {
 
 		expect(options.reasoning).toEqual({ enabled: true, effort: 'medium' });
 	});
+
+	it('translates max to xhigh without clamping (no restricted effort options)', () => {
+		const { options } = resolve('openrouter', 'moonshotai/kimi-k2.5', { reasoningEffort: 'max' });
+
+		expect(options.reasoning).toEqual({ enabled: true, effort: 'xhigh' });
+	});
 });
 
 describe('Vertex', () => {
@@ -288,5 +301,185 @@ describe('Mistral and Ollama', () => {
 		const { callSettings } = resolve('ollama', 'qwen3:8b', { temperature: 0.5, topK: 20 });
 
 		expect(callSettings).toEqual({ temperature: 0.5, topK: 20 });
+	});
+});
+
+describe('sampling bound clamps (stored values must never fail a request)', () => {
+	it('clamps a stored temperature above 1 to 1 for Claude', () => {
+		const { callSettings } = resolve('anthropic', 'claude-sonnet-4-6', { temperature: 1.5 });
+
+		expect(callSettings).toEqual({ temperature: 1 });
+	});
+
+	it('clamps temperature to 1.5 for Mistral', () => {
+		const { callSettings } = resolve('mistral', 'mistral-medium-latest', { temperature: 1.8 });
+
+		expect(callSettings).toEqual({ temperature: 1.5 });
+	});
+
+	it('passes a high temperature through for models with the default 0-2 range', () => {
+		const openai = resolve('openai', 'gpt-4.1', { temperature: 1.8 });
+		const gemini = resolve('google', 'gemini-3.1-pro-preview', { temperature: 1.8 });
+
+		expect(openai.callSettings).toEqual({ temperature: 1.8 });
+		expect(gemini.callSettings).toEqual({ temperature: 1.8 });
+	});
+
+	it('clamps temperature to 1 for Claude on Vertex and all Bedrock models', () => {
+		const vertexClaude = resolve('vertex', 'claude-sonnet-4-6', { temperature: 1.5 });
+		const bedrockClaude = resolve('bedrock', 'us.anthropic.claude-sonnet-4-6', { temperature: 1.5 });
+		const bedrockDeepseek = resolve('bedrock', 'deepseek.v3.2', { temperature: 1.5 });
+
+		expect(vertexClaude.callSettings).toEqual({ temperature: 1 });
+		expect(bedrockClaude.callSettings).toEqual({ temperature: 1 });
+		expect(bedrockDeepseek.callSettings).toEqual({ temperature: 1 });
+	});
+
+	it('clamps topP to the 0-1 range', () => {
+		const above = resolve('openai', 'gpt-4.1', { topP: 1.2 });
+		const below = resolve('openai', 'gpt-4.1', { topP: -0.1 });
+
+		expect(above.callSettings).toEqual({ topP: 1 });
+		expect(below.callSettings).toEqual({ topP: 0 });
+	});
+
+	it('clamps a negative temperature to 0', () => {
+		const { callSettings } = resolve('google', 'gemini-3.1-pro-preview', { temperature: -1 });
+
+		expect(callSettings).toEqual({ temperature: 0 });
+	});
+});
+
+describe('extra provider options', () => {
+	it('inverts parallelToolCalls into disableParallelToolUse for Anthropic', () => {
+		const enabled = resolve('anthropic', 'claude-sonnet-4-6', { parallelToolCalls: true });
+		const disabled = resolve('anthropic', 'claude-sonnet-4-6', { parallelToolCalls: false });
+
+		expect(enabled.options.disableParallelToolUse).toBe(false);
+		expect(disabled.options.disableParallelToolUse).toBe(true);
+		expect(enabled.options).not.toHaveProperty('parallelToolCalls');
+	});
+
+	it('passes the Anthropic-specific extras through unchanged', () => {
+		const { options } = resolve('anthropic', 'claude-sonnet-4-6', {
+			speed: 'fast',
+			inferenceGeo: 'us',
+			sendReasoning: false,
+		});
+
+		expect(options.speed).toBe('fast');
+		expect(options.inferenceGeo).toBe('us');
+		expect(options.sendReasoning).toBe(false);
+	});
+
+	it('never leaks stale extras to a model that does not declare them', () => {
+		const claude = resolve('anthropic', 'claude-sonnet-4-6', {
+			textVerbosity: 'low',
+			safetyThreshold: 'BLOCK_NONE',
+			safePrompt: true,
+			serviceTier: 'flex',
+		});
+		const openai = resolve('openai', 'gpt-5.5', { speed: 'fast', includeThoughts: true, safePrompt: true });
+		const openrouter = resolve('openrouter', 'moonshotai/kimi-k2.5', { serviceTier: 'flex', speed: 'fast' });
+		const ollama = resolve('ollama', 'qwen3:8b', { serviceTier: 'flex', textVerbosity: 'high' });
+
+		for (const key of ['textVerbosity', 'threshold', 'safetyThreshold', 'safePrompt', 'serviceTier']) {
+			expect(claude.options).not.toHaveProperty(key);
+		}
+		for (const key of ['speed', 'includeThoughts', 'thinkingConfig', 'safePrompt']) {
+			expect(openai.options).not.toHaveProperty(key);
+		}
+		for (const key of ['serviceTier', 'speed']) {
+			expect(openrouter.options).not.toHaveProperty(key);
+			expect(ollama.options).not.toHaveProperty(key);
+		}
+	});
+
+	it('passes the OpenAI extras through without inversion', () => {
+		const { options } = resolve('openai', 'gpt-5.5', {
+			textVerbosity: 'low',
+			reasoningSummary: 'detailed',
+			parallelToolCalls: false,
+			maxToolCalls: 5,
+			serviceTier: 'flex',
+		});
+
+		expect(options.textVerbosity).toBe('low');
+		expect(options.reasoningSummary).toBe('detailed');
+		expect(options.parallelToolCalls).toBe(false);
+		expect(options.maxToolCalls).toBe(5);
+		expect(options.serviceTier).toBe('flex');
+		expect(options).not.toHaveProperty('disableParallelToolUse');
+	});
+
+	it('maps the Gemini extras onto their provider option names', () => {
+		const { options } = resolve('google', 'gemini-3.1-pro-preview', {
+			safetyThreshold: 'BLOCK_NONE',
+			mediaResolution: 'MEDIA_RESOLUTION_HIGH',
+			serviceTier: 'priority',
+		});
+
+		expect(options.threshold).toBe('BLOCK_NONE');
+		expect(options).not.toHaveProperty('safetyThreshold');
+		expect(options.mediaResolution).toBe('MEDIA_RESOLUTION_HIGH');
+		expect(options.serviceTier).toBe('priority');
+	});
+
+	it('nests includeThoughts under thinkingConfig when set alone', () => {
+		const { options } = resolve('google', 'gemini-3.1-pro-preview', { includeThoughts: true });
+
+		expect(options.thinkingConfig).toEqual({ includeThoughts: true });
+	});
+
+	it('deep-merges includeThoughts with an active thinking level', () => {
+		const { options } = resolve('google', 'gemini-3.1-pro-preview', {
+			reasoningEffort: 'high',
+			includeThoughts: true,
+		});
+
+		expect(options.thinkingConfig).toEqual({ thinkingLevel: 'high', includeThoughts: true });
+	});
+
+	it('deep-merges includeThoughts with an active thinking budget', () => {
+		const { options } = resolve('google', 'gemini-2.5-pro', {
+			thinkingBudgetTokens: 2048,
+			includeThoughts: true,
+		});
+
+		expect(options.thinkingConfig).toEqual({ thinkingBudget: 2048, includeThoughts: true });
+	});
+
+	it('passes the Mistral extras through unchanged', () => {
+		const { options } = resolve('mistral', 'mistral-medium-latest', {
+			safePrompt: true,
+			parallelToolCalls: false,
+			documentImageLimit: 8,
+			documentPageLimit: 64,
+		});
+
+		expect(options.safePrompt).toBe(true);
+		expect(options.parallelToolCalls).toBe(false);
+		expect(options).not.toHaveProperty('disableParallelToolUse');
+		expect(options.documentImageLimit).toBe(8);
+		expect(options.documentPageLimit).toBe(64);
+	});
+
+	it('sends serviceTier for Bedrock models but ignores undeclared extras', () => {
+		const claude = resolve('bedrock', 'us.anthropic.claude-sonnet-4-6', {
+			serviceTier: 'reserved',
+			parallelToolCalls: false,
+		});
+		const deepseek = resolve('bedrock', 'deepseek.v3.2', { serviceTier: 'flex' });
+
+		expect(claude.options.serviceTier).toBe('reserved');
+		expect(claude.options).not.toHaveProperty('disableParallelToolUse');
+		expect(deepseek.options.serviceTier).toBe('flex');
+	});
+
+	it('applies the Anthropic inversion to Claude on Vertex', () => {
+		const { options } = resolve('vertex', 'claude-sonnet-4-6', { parallelToolCalls: false });
+
+		expect(options.disableParallelToolUse).toBe(true);
+		expect(options).not.toHaveProperty('parallelToolCalls');
 	});
 });

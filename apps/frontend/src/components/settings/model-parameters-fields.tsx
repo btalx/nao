@@ -23,9 +23,8 @@ export function ModelParametersFields({ controls, values, onValueChange, errors 
 	// Some models (Claude, direct or on Vertex/Bedrock) ignore sampling params while thinking is on.
 	const fieldControls = controls
 		.filter((c): c is FieldControl => c.kind !== 'effort')
-		.filter((c) => !(thinkingActive && c.kind === 'number' && c.group === 'sampling'));
-	const hidesSamplingWhileThinking =
-		thinkingActive && controls.some((c) => c.kind === 'number' && c.group === 'sampling');
+		.filter((c) => !isSamplingHiddenByThinking(c, thinkingActive));
+	const hidesSamplingWhileThinking = controls.some((c) => isSamplingHiddenByThinking(c, thinkingActive));
 
 	return (
 		<div className='grid gap-4'>
@@ -47,7 +46,7 @@ export function ModelParametersFields({ controls, values, onValueChange, errors 
 											${isActive ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground hover:text-foreground'}
 										`}
 									>
-										{option}
+										{option === 'off' ? 'Default' : option}
 									</button>
 								);
 							})}
@@ -217,11 +216,16 @@ export function buildInferenceSettings(controls: ParamControl[], values: ParamVa
 	return settings;
 }
 
-/** Friendly per-field validation against each control's bounds. Empty fields are valid (= default). */
+/**
+ * Friendly per-field validation against each control's bounds. Empty fields are
+ * valid (= default). Controls hidden by the render (sampling params while
+ * thinking is on) are skipped so invisible values can't block saving.
+ */
 export function getParamErrors(controls: ParamControl[], values: ParamValues): ParamErrors {
+	const thinkingActive = isThinkingActive(controls, values);
 	const errors: ParamErrors = {};
 	for (const control of controls) {
-		if (control.kind !== 'number') {
+		if (control.kind !== 'number' || isSamplingHiddenByThinking(control, thinkingActive)) {
 			continue;
 		}
 		const raw = (values[control.key] ?? '').trim();
@@ -253,6 +257,10 @@ function boundsMessage(min: number | undefined, max: number | undefined): string
 		return `Enter a value of at most ${max}.`;
 	}
 	return 'Enter a valid number.';
+}
+
+function isSamplingHiddenByThinking(control: ParamControl, thinkingActive: boolean): boolean {
+	return thinkingActive && control.kind === 'number' && control.group === 'sampling';
 }
 
 function isThinkingActive(controls: ParamControl[], values: ParamValues): boolean {

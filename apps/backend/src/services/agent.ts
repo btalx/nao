@@ -364,7 +364,9 @@ class AgentManager {
 		// gen_ai.request.* on the LLM span, but provider options (Anthropic
 		// thinking/effort) are not emitted by the AI SDK — so we attach the full
 		// resolved customization here to make it visible in the Langfuse trace.
-		const providerParams = this._modelConfig.providerOptions[provider];
+		// providerOptions has a single entry keyed by the SDK provider key (which
+		// can differ from our provider name, e.g. anthropic for Claude-on-Vertex).
+		const providerParams = Object.values(this._modelConfig.providerOptions)[0];
 		this._agent = new ToolLoopAgent({
 			model: this._modelConfig.model,
 			providerOptions: this._modelConfig.providerOptions,

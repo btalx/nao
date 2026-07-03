@@ -47,6 +47,7 @@ const ANTHROPIC_ADAPTIVE: ModelCapabilities = {
 	topK: false,
 	maxOutputTokens: true,
 	effortOptions: CLAUDE_EFFORTS,
+	temperatureMax: 1,
 	extraParams: ANTHROPIC_EXTRAS,
 };
 /** Legacy Claude (4-5 era): extended thinking with an explicit token budget; still accepts topK. */
@@ -55,6 +56,7 @@ const ANTHROPIC_BUDGET: ModelCapabilities = {
 	sampling: true,
 	topK: true,
 	maxOutputTokens: true,
+	temperatureMax: 1,
 	extraParams: ANTHROPIC_EXTRAS,
 };
 
@@ -119,6 +121,8 @@ const MISTRAL_SAMPLING: ModelCapabilities = {
 	sampling: true,
 	topK: false,
 	maxOutputTokens: true,
+	// Mistral's chat completions API rejects temperatures above 1.5.
+	temperatureMax: 1.5,
 	extraParams: MISTRAL_EXTRAS,
 };
 
@@ -137,6 +141,7 @@ const BEDROCK_ADAPTIVE: ModelCapabilities = {
 	topK: false,
 	maxOutputTokens: true,
 	effortOptions: CLAUDE_EFFORTS,
+	temperatureMax: 1,
 	extraParams: BEDROCK_EXTRAS,
 	serviceTierOptions: BEDROCK_TIERS,
 };
@@ -146,15 +151,17 @@ const BEDROCK_BUDGET: ModelCapabilities = {
 	sampling: true,
 	topK: true,
 	maxOutputTokens: true,
+	temperatureMax: 1,
 	extraParams: BEDROCK_EXTRAS,
 	serviceTierOptions: BEDROCK_TIERS,
 };
-/** Bedrock non-Claude models (DeepSeek, Mistral): sampling only. */
+/** Bedrock non-Claude models (DeepSeek, Mistral): sampling only; the Converse API caps temperature at 1. */
 const BEDROCK_SAMPLING: ModelCapabilities = {
 	thinking: 'none',
 	sampling: true,
 	topK: false,
 	maxOutputTokens: true,
+	temperatureMax: 1,
 	extraParams: BEDROCK_EXTRAS,
 	serviceTierOptions: BEDROCK_TIERS,
 };
@@ -602,6 +609,9 @@ export function getModelCapabilities(provider: LlmProvider, modelId: string): Mo
 
 const EFFORT_OPTIONS: ReasoningEffort[] = ['off', 'minimal', 'low', 'medium', 'high', 'max'];
 
+/** Temperature upper bound when a model's capabilities don't declare one. */
+export const DEFAULT_TEMPERATURE_MAX = 2;
+
 /**
  * Ordered list of editable inference-parameter controls for a model, derived from its
  * capabilities. Drives the settings UI (render exactly this list, nothing hardcoded).
@@ -633,18 +643,19 @@ export function getModelParameterSpec(provider: LlmProvider, modelId: string): P
 	}
 
 	if (caps.sampling) {
-		// Claude (direct or on Vertex/Bedrock) clamps temperature at 1, treats topP as mutually
-		// exclusive with temperature, and drops all sampling params while thinking is active.
+		// Claude (direct or on Vertex/Bedrock) treats topP as mutually exclusive with
+		// temperature and drops all sampling params while thinking is active.
 		const isClaude = isAnthropicApiModel(provider, modelId);
+		const temperatureMax = caps.temperatureMax ?? DEFAULT_TEMPERATURE_MAX;
 		controls.push(
 			{
 				key: 'temperature',
 				kind: 'number',
 				label: 'Temperature',
-				placeholder: isClaude ? '0 – 1' : '0 – 2',
+				placeholder: `0 – ${temperatureMax}`,
 				step: 0.1,
 				min: 0,
-				max: isClaude ? 1 : 2,
+				max: temperatureMax,
 				...(isClaude && { group: 'sampling' as const }),
 			},
 			{

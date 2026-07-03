@@ -219,4 +219,71 @@ describe('getModelParameterSpec', () => {
 		expect(controlByKey(controls, 'temperature')).toMatchObject({ max: 1, group: 'sampling' });
 		expect(controlByKey(controls, 'topP')).toMatchObject({ exclusiveWith: 'temperature' });
 	});
+
+	it('uses the provider-specific service tier vocabulary', () => {
+		const bedrock = getModelParameterSpec('bedrock', 'us.anthropic.claude-sonnet-4-6');
+		const google = getModelParameterSpec('google', 'gemini-3.1-pro-preview');
+
+		expect(controlByKey(bedrock, 'serviceTier')).toMatchObject({
+			kind: 'select',
+			options: ['default', 'reserved', 'priority', 'flex'],
+		});
+		expect(controlByKey(google, 'serviceTier')).toMatchObject({
+			kind: 'select',
+			options: ['standard', 'flex', 'priority'],
+		});
+	});
+
+	it('derives the Gemini safety and media select options from their schemas', () => {
+		const controls = getModelParameterSpec('google', 'gemini-3.1-pro-preview');
+
+		expect(controlByKey(controls, 'safetyThreshold')).toMatchObject({
+			kind: 'select',
+			options: [
+				'HARM_BLOCK_THRESHOLD_UNSPECIFIED',
+				'BLOCK_LOW_AND_ABOVE',
+				'BLOCK_MEDIUM_AND_ABOVE',
+				'BLOCK_ONLY_HIGH',
+				'BLOCK_NONE',
+				'OFF',
+			],
+		});
+		expect(controlByKey(controls, 'mediaResolution')).toMatchObject({
+			kind: 'select',
+			options: [
+				'MEDIA_RESOLUTION_UNSPECIFIED',
+				'MEDIA_RESOLUTION_LOW',
+				'MEDIA_RESOLUTION_MEDIUM',
+				'MEDIA_RESOLUTION_HIGH',
+			],
+		});
+	});
+
+	it('derives boolean and number controls for the Mistral extras', () => {
+		const controls = getModelParameterSpec('mistral', 'mistral-medium-latest');
+
+		expect(controls.map((c) => c.key)).toEqual([
+			'temperature',
+			'topP',
+			'maxOutputTokens',
+			'safePrompt',
+			'parallelToolCalls',
+			'documentImageLimit',
+			'documentPageLimit',
+		]);
+		expect(controlByKey(controls, 'safePrompt')).toMatchObject({ kind: 'boolean' });
+		expect(controlByKey(controls, 'parallelToolCalls')).toMatchObject({ kind: 'boolean' });
+		expect(controlByKey(controls, 'documentImageLimit')).toMatchObject({ kind: 'number', min: 1 });
+		expect(controlByKey(controls, 'documentPageLimit')).toMatchObject({ kind: 'number', min: 1 });
+	});
+
+	it('derives the temperature bound from each model capability', () => {
+		const mistral = getModelParameterSpec('mistral', 'mistral-medium-latest');
+		const bedrockDeepseek = getModelParameterSpec('bedrock', 'deepseek.v3.2');
+		const gemini = getModelParameterSpec('google', 'gemini-3.1-pro-preview');
+
+		expect(controlByKey(mistral, 'temperature')).toMatchObject({ max: 1.5, placeholder: '0 – 1.5' });
+		expect(controlByKey(bedrockDeepseek, 'temperature')).toMatchObject({ max: 1 });
+		expect(controlByKey(gemini, 'temperature')).toMatchObject({ max: 2 });
+	});
 });

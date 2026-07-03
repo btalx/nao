@@ -147,6 +147,8 @@ export type ModelCapabilities = {
 	maxOutputTokens: boolean;
 	/** Restrict the exposed reasoning-effort options (e.g. Mistral only supports off/high). */
 	effortOptions?: ReasoningEffort[];
+	/** Highest temperature the provider accepts (defaults to 2); drives the UI bound and a request-time clamp. */
+	temperatureMax?: number;
 	/** Additional provider-specific per-call options this model supports. */
 	extraParams?: ExtraParamKey[];
 	/** Allowed service tiers, when `extraParams` includes `serviceTier` (values vary per provider). */

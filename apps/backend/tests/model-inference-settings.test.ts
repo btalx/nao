@@ -49,11 +49,59 @@ describe('modelInferenceSettingsSchema', () => {
 		expect(modelInferenceSettingsSchema.safeParse({ thinkingBudgetTokens: 2048.5 }).success).toBe(false);
 	});
 
-	it('restricts reasoningEffort to the known efforts', () => {
-		for (const effort of ['off', 'low', 'medium', 'high', 'max']) {
+	it('restricts reasoningEffort to the known efforts, including minimal', () => {
+		for (const effort of ['off', 'minimal', 'low', 'medium', 'high', 'max']) {
 			expect(modelInferenceSettingsSchema.safeParse({ reasoningEffort: effort }).success).toBe(true);
 		}
 		expect(modelInferenceSettingsSchema.safeParse({ reasoningEffort: 'ultra' }).success).toBe(false);
+	});
+
+	it('accepts all extra provider params together', () => {
+		const result = modelInferenceSettingsSchema.safeParse({
+			textVerbosity: 'low',
+			reasoningSummary: 'detailed',
+			parallelToolCalls: false,
+			maxToolCalls: 20,
+			serviceTier: 'flex',
+			speed: 'fast',
+			inferenceGeo: 'global',
+			sendReasoning: true,
+			includeThoughts: true,
+			safetyThreshold: 'BLOCK_NONE',
+			mediaResolution: 'MEDIA_RESOLUTION_HIGH',
+			safePrompt: true,
+			documentImageLimit: 8,
+			documentPageLimit: 64,
+		});
+
+		expect(result.success).toBe(true);
+	});
+
+	it('restricts the enum extras to their vocabularies', () => {
+		expect(modelInferenceSettingsSchema.safeParse({ textVerbosity: 'verbose' }).success).toBe(false);
+		expect(modelInferenceSettingsSchema.safeParse({ reasoningSummary: 'concise' }).success).toBe(false);
+		expect(modelInferenceSettingsSchema.safeParse({ serviceTier: 'turbo' }).success).toBe(false);
+		expect(modelInferenceSettingsSchema.safeParse({ speed: 'slow' }).success).toBe(false);
+		expect(modelInferenceSettingsSchema.safeParse({ inferenceGeo: 'eu' }).success).toBe(false);
+		expect(modelInferenceSettingsSchema.safeParse({ safetyThreshold: 'BLOCK_ALL' }).success).toBe(false);
+		expect(modelInferenceSettingsSchema.safeParse({ mediaResolution: 'MEDIA_RESOLUTION_ULTRA' }).success).toBe(
+			false,
+		);
+	});
+
+	it('requires the boolean extras to be booleans', () => {
+		expect(modelInferenceSettingsSchema.safeParse({ parallelToolCalls: 'yes' }).success).toBe(false);
+		expect(modelInferenceSettingsSchema.safeParse({ sendReasoning: 1 }).success).toBe(false);
+		expect(modelInferenceSettingsSchema.safeParse({ includeThoughts: false }).success).toBe(true);
+		expect(modelInferenceSettingsSchema.safeParse({ safePrompt: true }).success).toBe(true);
+	});
+
+	it('requires the numeric extras to be positive integers', () => {
+		expect(modelInferenceSettingsSchema.safeParse({ maxToolCalls: 1 }).success).toBe(true);
+		expect(modelInferenceSettingsSchema.safeParse({ maxToolCalls: 0 }).success).toBe(false);
+		expect(modelInferenceSettingsSchema.safeParse({ maxToolCalls: 2.5 }).success).toBe(false);
+		expect(modelInferenceSettingsSchema.safeParse({ documentImageLimit: 0 }).success).toBe(false);
+		expect(modelInferenceSettingsSchema.safeParse({ documentPageLimit: 0 }).success).toBe(false);
 	});
 });
 

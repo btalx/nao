@@ -19,7 +19,7 @@ import type {
 	ProviderSettings,
 	ReasoningEffort,
 } from '../types/llm';
-import { getModelCapabilities, isAnthropicApiModel, PROVIDER_META } from './provider-meta';
+import { DEFAULT_TEMPERATURE_MAX, getModelCapabilities, isAnthropicApiModel, PROVIDER_META } from './provider-meta';
 
 export {
 	getDefaultModelId,
@@ -207,7 +207,7 @@ export function createProviderModel(
  * Translate normalized per-model inference settings into AI SDK call settings and
  * provider-specific option overrides, based on the model's declared capabilities.
  * Sampling params (temperature/topP/topK) are dropped for Claude when thinking is active
- * (its Messages API rejects them), and never sent to models that don't support sampling.
+ * So we hide these options for models that don't support sampling.
  */
 function resolveInferenceOptions(
 	provider: LlmProvider,
@@ -233,11 +233,14 @@ function resolveInferenceOptions(
 	// Claude's Messages API rejects sampling params while thinking is active.
 	const dropSampling = claudeApi && thinkingActive;
 	if (capabilities?.sampling !== false && !dropSampling) {
+		// Clamp to the provider bound so a stale stored value (e.g. 1.5 saved for a Claude
+		// model that caps temperature at 1) degrades gracefully instead of failing the request.
 		if (settings.temperature !== undefined) {
-			callSettings.temperature = settings.temperature;
+			const temperatureMax = capabilities?.temperatureMax ?? DEFAULT_TEMPERATURE_MAX;
+			callSettings.temperature = clampNumber(settings.temperature, 0, temperatureMax);
 		}
 		if (settings.topP !== undefined) {
-			callSettings.topP = settings.topP;
+			callSettings.topP = clampNumber(settings.topP, 0, 1);
 		}
 		// topK is deprecated on newer models (e.g. Claude Opus 4.8); only send it when the
 		// model declares support, so a stale stored value can't trigger an API error.
@@ -256,6 +259,10 @@ function resolveInferenceOptions(
 		callSettings: Object.keys(callSettings).length > 0 ? callSettings : undefined,
 		providerOverrides,
 	};
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+	return Math.min(Math.max(value, min), max);
 }
 
 type ThinkingResult = { providerOverrides?: Record<string, unknown>; thinkingActive: boolean };
