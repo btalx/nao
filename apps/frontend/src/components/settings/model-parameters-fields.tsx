@@ -237,6 +237,10 @@ export function getParamErrors(controls: ParamControl[], values: ParamValues): P
 			errors[control.key] = 'Enter a valid number.';
 			continue;
 		}
+		if (control.integer && !Number.isInteger(parsed)) {
+			errors[control.key] = 'Enter a whole number.';
+			continue;
+		}
 		const belowMin = control.min !== undefined && parsed < control.min;
 		const aboveMax = control.max !== undefined && parsed > control.max;
 		if (belowMin || aboveMax) {

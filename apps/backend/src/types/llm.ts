@@ -175,6 +175,8 @@ export type ParamControl =
 			step: number;
 			min?: number;
 			max?: number;
+			/** The stored-settings schema only accepts whole numbers for this param. */
+			integer?: boolean;
 			/** Sampling controls are disabled while thinking is active. */
 			group?: 'sampling';
 			/** Disabled when the referenced param has a value (mutually exclusive settings). */

@@ -2,7 +2,7 @@ import '../src/env';
 
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { NewUser } from '../src/db/abstractSchema';
 import { organization, project, projectLlmConfig, user } from '../src/db/sqlite-schema';
@@ -59,6 +59,7 @@ describe('userTable', () => {
 
 describe('projectLlmConfig modelSettings', () => {
 	const db = drizzle('./db.sqlite', { schema: sqliteSchema });
+	db.$client.pragma('foreign_keys = ON');
 
 	const ORG_ID = 'llm-config-test-org';
 	const PROJECT_ID = 'llm-config-test-project';
@@ -68,9 +69,14 @@ describe('projectLlmConfig modelSettings', () => {
 		'claude-sonnet-4-5': { thinkingBudgetTokens: 8192, temperature: 0.7 },
 	};
 
-	afterEach(async () => {
+	const cleanup = async () => {
+		await db.delete(projectLlmConfig).where(eq(projectLlmConfig.projectId, PROJECT_ID));
+		await db.delete(project).where(eq(project.id, PROJECT_ID));
 		await db.delete(organization).where(eq(organization.id, ORG_ID));
-	});
+	};
+
+	beforeEach(cleanup);
+	afterEach(cleanup);
 
 	afterAll(() => {
 		db.$client.close();

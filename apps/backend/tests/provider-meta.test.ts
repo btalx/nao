@@ -48,10 +48,20 @@ describe('getModelCapabilities', () => {
 		});
 	});
 
-	it('falls back to reasoning capabilities for custom OpenAI and Azure models', () => {
-		const expected = { thinking: 'adaptive', sampling: false, topK: false };
-		expect(getModelCapabilities('openai', 'custom-model')).toMatchObject(expected);
-		expect(getModelCapabilities('azure', 'my-deployment')).toMatchObject(expected);
+	it('falls back to reasoning capabilities for custom OpenAI models', () => {
+		expect(getModelCapabilities('openai', 'custom-model')).toMatchObject({
+			thinking: 'adaptive',
+			sampling: false,
+			topK: false,
+		});
+	});
+
+	it('falls back to reasoning plus sampling for custom Azure deployments', () => {
+		expect(getModelCapabilities('azure', 'my-deployment')).toMatchObject({
+			thinking: 'adaptive',
+			sampling: true,
+			topK: false,
+		});
 	});
 
 	it('falls back to level-based thinking for custom Google models', () => {
@@ -237,6 +247,16 @@ describe('getModelParameterSpec', () => {
 			options: ['off', 'minimal', 'low', 'medium', 'high'],
 		});
 		expect(controlByKey(custom, 'reasoningEffort')).toMatchObject({ options: ['off', 'low', 'high'] });
+	});
+
+	it('marks integer-only params and leaves float params unmarked', () => {
+		const controls = getModelParameterSpec('anthropic', 'claude-sonnet-4-5');
+
+		expect(controlByKey(controls, 'thinkingBudgetTokens')).toMatchObject({ integer: true });
+		expect(controlByKey(controls, 'topK')).toMatchObject({ integer: true });
+		expect(controlByKey(controls, 'maxOutputTokens')).toMatchObject({ integer: true });
+		expect(controlByKey(controls, 'temperature')).not.toHaveProperty('integer');
+		expect(controlByKey(controls, 'topP')).not.toHaveProperty('integer');
 	});
 
 	it('applies the Claude sampling rules to Claude on Bedrock', () => {

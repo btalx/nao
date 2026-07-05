@@ -421,8 +421,6 @@ function resolveThinking(
 		case 'google':
 		case 'vertex':
 			return resolveGeminiThinking(capabilities, effort, settings);
-		case 'mistral':
-			return resolveEffortThinking(effort, () => ({ reasoningEffort: 'high' }));
 		default:
 			return THINKING_INACTIVE;
 	}

@@ -89,6 +89,14 @@ const OPENAI_REASONING_CUSTOM: ModelCapabilities = {
 	...OPENAI_REASONING,
 	effortOptions: undefined,
 };
+/**
+ * Custom Azure deployments: user-named, so nothing reveals whether they host a reasoning or a
+ * sampling model. Offer both surfaces — params are only sent when explicitly configured.
+ */
+const AZURE_CUSTOM: ModelCapabilities = {
+	...OPENAI_REASONING_CUSTOM,
+	sampling: true,
+};
 /** OpenAI/Azure non-reasoning models (GPT-4.1): sampling only, no topK, no reasoning-related options. */
 const OPENAI_SAMPLING: ModelCapabilities = {
 	thinking: 'none',
@@ -611,8 +619,9 @@ export function getModelCapabilities(provider: LlmProvider, modelId: string): Mo
 		case 'anthropic':
 			return ANTHROPIC_ADAPTIVE;
 		case 'openai':
-		case 'azure':
 			return OPENAI_REASONING_CUSTOM;
+		case 'azure':
+			return AZURE_CUSTOM;
 		case 'google':
 			return GOOGLE_LEVEL_CUSTOM;
 		case 'vertex':
@@ -664,6 +673,7 @@ export function getModelParameterSpec(provider: LlmProvider, modelId: string): P
 			label: 'Thinking budget (tokens)',
 			placeholder: 'e.g. 8000',
 			step: 1024,
+			integer: true,
 			// The stored-settings schema floors the budget at 1024 even when the API range starts lower.
 			min: Math.max(1024, range?.min ?? 1024),
 			...(range && { max: range.max }),
@@ -706,6 +716,7 @@ export function getModelParameterSpec(provider: LlmProvider, modelId: string): P
 				placeholder: 'e.g. 40',
 				step: 1,
 				min: 1,
+				integer: true,
 				...(isClaude && { group: 'sampling' as const }),
 			});
 		}
@@ -719,6 +730,7 @@ export function getModelParameterSpec(provider: LlmProvider, modelId: string): P
 			placeholder: 'e.g. 16000',
 			step: 1,
 			min: 1,
+			integer: true,
 		});
 	}
 
@@ -738,7 +750,15 @@ function buildExtraParamControl(key: ExtraParamKey, caps: ModelCapabilities): Pa
 		case 'parallelToolCalls':
 			return { key, kind: 'boolean', label: 'Parallel tool calls' };
 		case 'maxToolCalls':
-			return { key, kind: 'number', label: 'Max tool calls', placeholder: 'e.g. 20', step: 1, min: 1 };
+			return {
+				key,
+				kind: 'number',
+				label: 'Max tool calls',
+				placeholder: 'e.g. 20',
+				step: 1,
+				min: 1,
+				integer: true,
+			};
 		case 'serviceTier':
 			return { key, kind: 'select', label: 'Service tier', options: caps.serviceTierOptions ?? [] };
 		case 'speed':
@@ -756,8 +776,24 @@ function buildExtraParamControl(key: ExtraParamKey, caps: ModelCapabilities): Pa
 		case 'safePrompt':
 			return { key, kind: 'boolean', label: 'Safe prompt' };
 		case 'documentImageLimit':
-			return { key, kind: 'number', label: 'Document image limit', placeholder: 'e.g. 8', step: 1, min: 1 };
+			return {
+				key,
+				kind: 'number',
+				label: 'Document image limit',
+				placeholder: 'e.g. 8',
+				step: 1,
+				min: 1,
+				integer: true,
+			};
 		case 'documentPageLimit':
-			return { key, kind: 'number', label: 'Document page limit', placeholder: 'e.g. 64', step: 1, min: 1 };
+			return {
+				key,
+				kind: 'number',
+				label: 'Document page limit',
+				placeholder: 'e.g. 64',
+				step: 1,
+				min: 1,
+				integer: true,
+			};
 	}
 }

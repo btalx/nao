@@ -162,14 +162,14 @@ describe('OpenAI / Azure', () => {
 		expect(callSettings).toEqual({ temperature: 1.5, topP: 0.8 });
 	});
 
-	it('falls back to reasoning capabilities for custom Azure deployments', () => {
+	it('offers both effort and sampling for custom Azure deployments', () => {
 		const { options, callSettings } = resolve('azure', 'my-gpt-deployment', {
 			reasoningEffort: 'low',
 			temperature: 0.9,
 		});
 
 		expect(options.reasoningEffort).toBe('low');
-		expect(callSettings).toBeUndefined();
+		expect(callSettings).toEqual({ temperature: 0.9 });
 	});
 });
 

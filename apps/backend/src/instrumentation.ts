@@ -2,15 +2,25 @@ import { LangfuseSpanProcessor } from '@langfuse/otel';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 
 /**
- * Langfuse tracing is opt-in: it only activates when credentials are present so
- * self-hosted deployments without Langfuse keys keep running untouched. The
- * processor reads LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_BASE_URL
- * from the environment, so this module must be imported after `./env` (which
- * loads the .env file) and before any AI SDK call is made.
+ * Langfuse tracing is opt-in and requires an explicit destination: it only
+ * activates when LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY and LANGFUSE_BASE_URL
+ * are all set. Without the explicit base URL the SDK would default to
+ * cloud.langfuse.com, silently exporting prompts and responses to a third
+ * party — a misconfigured self-hosted deployment must fail closed instead.
+ * This module must be imported after `./env` (which loads the .env file) and
+ * before any AI SDK call is made.
  */
-const credentialsPresent = Boolean(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY);
+const keysPresent = Boolean(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY);
+const baseUrl = process.env.LANGFUSE_BASE_URL;
 
-export const langfuseSpanProcessor = credentialsPresent ? new LangfuseSpanProcessor() : undefined;
+export const langfuseSpanProcessor = keysPresent && baseUrl ? new LangfuseSpanProcessor({ baseUrl }) : undefined;
+
+if (keysPresent && !baseUrl) {
+	console.warn(
+		'Langfuse keys are set but LANGFUSE_BASE_URL is missing — tracing stays disabled. ' +
+			'Set it explicitly (e.g. https://cloud.langfuse.com or your self-hosted instance) to enable export.',
+	);
+}
 
 if (langfuseSpanProcessor) {
 	const tracerProvider = new NodeTracerProvider({
@@ -26,7 +36,7 @@ if (langfuseSpanProcessor) {
 		void flushTelemetry();
 	});
 
-	console.log('✓ Langfuse tracing enabled');
+	console.log(`✓ Langfuse tracing enabled → ${baseUrl}`);
 }
 
 export async function flushTelemetry(): Promise<void> {

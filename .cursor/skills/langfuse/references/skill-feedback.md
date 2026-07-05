@@ -32,10 +32,10 @@ Format the body as markdown with the two field labels as headings.
 
 ## Submitting
 
-Create a GitHub Discussion on the `langfuse/skills` repository using the GraphQL API:
+Create a GitHub Discussion on the `langfuse/skills` repository using the GraphQL API. Pipe the body via a quoted heredoc (`-F body=@-` reads it from stdin) so quotes, `$`, and backticks in the markdown are never interpreted by the shell:
 
 ```bash
-gh api graphql -f query='
+cat <<'FEEDBACK_EOF' | gh api graphql -f query='
 mutation($repoId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
   createDiscussion(input: {repositoryId: $repoId, categoryId: $categoryId, title: $title, body: $body}) {
     discussion { url }
@@ -43,8 +43,10 @@ mutation($repoId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
 }' \
   -f repoId="$(gh api graphql -f query='{ repository(owner: "langfuse", name: "skills") { id } }' --jq '.data.repository.id')" \
   -f categoryId="$(gh api graphql -f query='{ repository(owner: "langfuse", name: "skills") { discussionCategories(first: 10) { nodes { id name } } } }' --jq '.data.repository.discussionCategories.nodes[] | select(.name == "Ideas & Improvements") | .id')" \
-  -f title="<concise title>" \
-  -f body="<formatted feedback>"
+  -f title='<concise title>' \
+  -F body=@-
+<formatted feedback>
+FEEDBACK_EOF
 ```
 
 If the `gh` CLI is not authenticated or the request fails, give the user this link to create the discussion manually:

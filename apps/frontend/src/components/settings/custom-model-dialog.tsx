@@ -1,13 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { getModelParameterSpec } from '@nao/backend/provider-meta';
-import {
-	buildInferenceSettings,
-	getParamErrors,
-	ModelParametersFields,
-	seedParamValues,
-} from './model-parameters-fields';
-import type { ParamValues } from './model-parameters-fields';
-import type { CustomModelMetadata, ModelInferenceSettings, ParamKey } from '@nao/backend/llm';
+import { useEffect, useRef, useState } from 'react';
+import { ModelParametersFields } from './model-parameters-fields';
+import { useModelParameters } from './use-model-parameters';
+import type { CustomModelMetadata, ModelInferenceSettings } from '@nao/backend/llm';
 import type { LlmProvider } from '@nao/shared/types';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -43,8 +37,8 @@ export function CustomModelDialog({
 	parametersValue,
 	onSaveParameters,
 }: CustomModelDialogProps) {
-	const controls = useMemo(() => (modelId ? getModelParameterSpec(provider, modelId) : []), [provider, modelId]);
-	const supportsModelParameters = controls.length > 0;
+	const parameters = useModelParameters({ provider, modelId, open, value: parametersValue });
+	const supportsModelParameters = parameters.controls.length > 0;
 	const [displayName, setDisplayName] = useState('');
 	const [costs, setCosts] = useState<Record<CostKey, string>>({
 		inputNoCache: '',
@@ -52,10 +46,12 @@ export function CustomModelDialog({
 		inputCacheWrite: '',
 		output: '',
 	});
-	const [paramValues, setParamValues] = useState<ParamValues>({});
+	const wasOpenRef = useRef(false);
 
 	useEffect(() => {
-		if (!open) {
+		const justOpened = open && !wasOpenRef.current;
+		wasOpenRef.current = open;
+		if (!justOpened) {
 			return;
 		}
 		setDisplayName(value?.displayName ?? '');
@@ -65,14 +61,10 @@ export function CustomModelDialog({
 			inputCacheWrite: formatCost(value?.costPerM?.inputCacheWrite),
 			output: formatCost(value?.costPerM?.output),
 		});
-		setParamValues(seedParamValues(controls, parametersValue));
-	}, [open, value, parametersValue, controls]);
-
-	const paramErrors = getParamErrors(controls, paramValues);
-	const hasParamErrors = Object.keys(paramErrors).length > 0;
+	}, [open, value]);
 
 	const handleSave = () => {
-		if (hasParamErrors) {
+		if (parameters.hasErrors) {
 			return;
 		}
 		const costPerM = buildCostPerM(costs);
@@ -83,7 +75,7 @@ export function CustomModelDialog({
 			costPerM,
 		});
 		if (supportsModelParameters) {
-			onSaveParameters?.(buildInferenceSettings(controls, paramValues));
+			onSaveParameters?.(parameters.buildSettings());
 		}
 		onOpenChange(false);
 	};
@@ -154,12 +146,10 @@ export function CustomModelDialog({
 						<div className='grid gap-2 border-t border-border pt-4'>
 							<span className='text-sm font-medium text-foreground'>Model parameters</span>
 							<ModelParametersFields
-								controls={controls}
-								values={paramValues}
-								errors={paramErrors}
-								onValueChange={(key: ParamKey, val: string) =>
-									setParamValues((prev) => ({ ...prev, [key]: val }))
-								}
+								controls={parameters.controls}
+								values={parameters.values}
+								errors={parameters.errors}
+								onValueChange={parameters.setValue}
 							/>
 						</div>
 					)}
@@ -169,7 +159,7 @@ export function CustomModelDialog({
 					<Button variant='ghost' size='sm' onClick={() => onOpenChange(false)} type='button'>
 						Cancel
 					</Button>
-					<Button size='sm' onClick={handleSave} type='button' disabled={hasParamErrors}>
+					<Button size='sm' onClick={handleSave} type='button' disabled={parameters.hasErrors}>
 						Save
 					</Button>
 				</div>

@@ -1,13 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { getModelParameterSpec } from '@nao/backend/provider-meta';
-import {
-	buildInferenceSettings,
-	getParamErrors,
-	ModelParametersFields,
-	seedParamValues,
-} from './model-parameters-fields';
-import type { ParamValues } from './model-parameters-fields';
-import type { ModelInferenceSettings, ParamKey } from '@nao/backend/llm';
+import { ModelParametersFields } from './model-parameters-fields';
+import { useModelParameters } from './use-model-parameters';
+import type { ModelInferenceSettings } from '@nao/backend/llm';
 import type { LlmProvider } from '@nao/shared/types';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -29,23 +22,18 @@ export function ModelParametersDialog({
 	value,
 	onSave,
 }: ModelParametersDialogProps) {
-	const controls = useMemo(() => getModelParameterSpec(provider, model.id), [provider, model.id]);
-	const [values, setValues] = useState<ParamValues>({});
-
-	useEffect(() => {
-		if (open) {
-			setValues(seedParamValues(controls, value));
-		}
-	}, [open, controls, value]);
-
-	const errors = getParamErrors(controls, values);
-	const hasErrors = Object.keys(errors).length > 0;
+	const { controls, values, setValue, errors, hasErrors, buildSettings } = useModelParameters({
+		provider,
+		modelId: model.id,
+		open,
+		value,
+	});
 
 	const handleSave = () => {
 		if (hasErrors) {
 			return;
 		}
-		onSave(buildInferenceSettings(controls, values));
+		onSave(buildSettings());
 		onOpenChange(false);
 	};
 
@@ -57,12 +45,7 @@ export function ModelParametersDialog({
 					<DialogDescription className='font-mono text-xs break-all'>{model.name}</DialogDescription>
 				</DialogHeader>
 
-				<ModelParametersFields
-					controls={controls}
-					values={values}
-					errors={errors}
-					onValueChange={(key: ParamKey, val: string) => setValues((prev) => ({ ...prev, [key]: val }))}
-				/>
+				<ModelParametersFields controls={controls} values={values} errors={errors} onValueChange={setValue} />
 
 				<div className='flex justify-end gap-2 pt-2'>
 					<Button variant='ghost' size='sm' onClick={() => onOpenChange(false)} type='button'>

@@ -7,7 +7,7 @@ import { db } from '../src/db/db';
 import { getProjectLlmConfigByProvider, upsertProjectLlmConfig } from '../src/queries/project-llm-config.queries';
 import type { ModelSettingsMap } from '../src/types/llm';
 
-const TEST_DB_PATH = './model-settings-test.sqlite';
+const TEST_DB_PATH = vi.hoisted(() => './model-settings-test.sqlite');
 
 vi.mock('../src/db/db', async () => {
 	const { default: Database } = await import('better-sqlite3');
@@ -16,8 +16,8 @@ vi.mock('../src/db/db', async () => {
 	const sqliteSchema = await import('../src/db/sqlite-schema');
 	const { default: fsModule } = await import('node:fs');
 
-	fsModule.rmSync('./model-settings-test.sqlite', { force: true });
-	const sqlite = new Database('./model-settings-test.sqlite');
+	fsModule.rmSync(TEST_DB_PATH, { force: true });
+	const sqlite = new Database(TEST_DB_PATH);
 	const statements = await generateSQLiteMigration(
 		await generateSQLiteDrizzleJson({}),
 		await generateSQLiteDrizzleJson(sqliteSchema),
