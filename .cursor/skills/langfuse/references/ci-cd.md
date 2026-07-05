@@ -16,7 +16,7 @@ metadata:
 - [ ] Follow the [CI/CD docs page](https://langfuse.com/docs/evaluation/experiments/experiments-ci-cd) and the [langfuse/experiment-action README](https://github.com/langfuse/experiment-action)
 - [ ] Inspect whether the local repository is a GitHub repo. If not, `langfuse/experiment-action` is not applicable. Follow the guide for other [CI/CD systems](https://langfuse.com/docs/evaluation/experiments/experiments-ci-cd#other-cicd-systems) instead
 - [ ] Ask the user which [evaluators and run evaluators](https://langfuse.com/docs/evaluation/experiments/experiments-via-sdk#evaluators) they want to set up
-- [ ] Ask the user if and when yes which regression thresholds they want to set
+- [ ] Ask the user if they want to set regression thresholds, and if yes, which thresholds they want to set
 - [ ] Confirm dataset existence and shape of the dataset items before writing code with the Langfuse CLI (see `references/cli.md`)
     - `langfuse-cli api datasets list`
     - `langfuse-cli api dataset-items list --dataset-name <dataset name> --limit 5`
