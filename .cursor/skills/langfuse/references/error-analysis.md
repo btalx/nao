@@ -21,7 +21,7 @@ metadata:
 
 https://langfuse.com/guides/cookbook/error-analysis-llm-applications.md
 
-If fetch is not available query for langfuse.com error analysis guide
+If fetch is not available, search for 'langfuse.com error analysis guide' instead.
 
 Read it in full. It defines the authoritative 5-step process (sample selection → open coding → clustering → labelling → deciding what to fix).
 
