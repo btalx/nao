@@ -19,7 +19,7 @@ import {
 	YAxis,
 } from 'recharts';
 
-import { collectAxisValues, resolveYAxisDomain } from './chart-domain';
+import { collectAxisValues, collectStackedAxisValues, resolveYAxisDomain } from './chart-domain';
 import { type DateFormatSettings, formatDateValue, isIsoDateLike } from './date';
 import * as displayChart from './tools/display-chart';
 
@@ -199,10 +199,8 @@ function buildBarChart(props: ResolvedProps) {
 		yAxisMax,
 	} = props;
 	const isStacked = chartType === 'stacked_bar';
-	const axisValues = collectAxisValues(
-		data,
-		series.map((s) => s.data_key),
-	);
+	const dataKeys = series.map((s) => s.data_key);
+	const axisValues = isStacked ? collectStackedAxisValues(data, dataKeys) : collectAxisValues(data, dataKeys);
 
 	return (
 		<BarChart data={data} accessibilityLayer margin={margin}>

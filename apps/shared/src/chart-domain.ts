@@ -33,10 +33,28 @@ export function collectAxisValues(data: Record<string, unknown>[], dataKeys: str
 	return data.flatMap((row) =>
 		dataKeys
 			.map((key) => row[key])
-			.filter((value) => !isEmptyAxisValue(value))
-			.map((value) => Number(value))
-			.filter((value) => Number.isFinite(value)),
+			.map(toAxisNumber)
+			.filter((value) => value !== undefined),
 	);
+}
+
+export function collectStackedAxisValues(data: Record<string, unknown>[], dataKeys: string[]): number[] {
+	return data.flatMap((row) => {
+		const totals = dataKeys.reduce(
+			(currentTotals, key) => {
+				const value = toAxisNumber(row[key]);
+				if (value === undefined) {
+					return currentTotals;
+				}
+				if (value >= 0) {
+					return { ...currentTotals, positive: currentTotals.positive + value };
+				}
+				return { ...currentTotals, negative: currentTotals.negative + value };
+			},
+			{ negative: 0, positive: 0 },
+		);
+		return [totals.negative, totals.positive].filter((value) => value !== 0);
+	});
 }
 
 export function resolveYAxisDomain(
@@ -79,8 +97,12 @@ function maxOf(values: number[]): number {
 	return values.reduce((currentMax, value) => Math.max(currentMax, value), values[0] ?? 0);
 }
 
-function isEmptyAxisValue(value: unknown): boolean {
-	return value === null || value === undefined || (typeof value === 'string' && value.trim() === '');
+function toAxisNumber(value: unknown): number | undefined {
+	if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) {
+		return undefined;
+	}
+	const number = Number(value);
+	return Number.isFinite(number) ? number : undefined;
 }
 
 function separateInvertedBounds(

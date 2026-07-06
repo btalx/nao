@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { collectAxisValues, computeNiceDomain, niceNumber, resolveYAxisDomain } from '../src/chart-domain';
+import {
+	collectAxisValues,
+	collectStackedAxisValues,
+	computeNiceDomain,
+	niceNumber,
+	resolveYAxisDomain,
+} from '../src/chart-domain';
 
 describe('chart domain helpers', () => {
 	describe('niceNumber', () => {
@@ -111,6 +117,33 @@ describe('chart domain helpers', () => {
 					['revenue'],
 				),
 			).toEqual([1_000_000, 1_050_000]);
+		});
+	});
+
+	describe('collectStackedAxisValues', () => {
+		it('collects rendered stack totals across rows', () => {
+			const values = collectStackedAxisValues(
+				[
+					{ costs: 60, revenue: 50 },
+					{ costs: 40, revenue: 30 },
+				],
+				['costs', 'revenue'],
+			);
+
+			expect(values).toEqual([110, 70]);
+			expect(resolveYAxisDomain(0, undefined, values, true)).toEqual([0, 110]);
+		});
+
+		it('tracks positive and negative stack totals separately', () => {
+			expect(
+				collectStackedAxisValues(
+					[
+						{ costs: 60, refunds: -20, revenue: 50 },
+						{ costs: '', refunds: null, revenue: '25' },
+					],
+					['costs', 'refunds', 'revenue'],
+				),
+			).toEqual([-20, 110, 25]);
 		});
 	});
 });
