@@ -230,9 +230,11 @@ function buildBarChart(props: ResolvedProps) {
 		showDataLabels,
 	} = props;
 	const isStacked = chartType === 'stacked_bar';
-	const yAxisDomain = showDataLabels ? calculateYAxisDomain(data, series, chartType) : undefined;
-	const stackTotalSeriesIndex = showDataLabels && isStacked ? findStackTotalSeriesIndex(series) : -1;
-	const stackTotalLabel = stackTotalSeriesIndex >= 0 ? renderStackTotalLabel(data, series) : undefined;
+	const renderedSeries = getRenderedSeries(isStacked, series);
+	const yAxisDomain = showDataLabels ? calculateYAxisDomain(data, renderedSeries, chartType) : undefined;
+	const stackTotalLabel =
+		showDataLabels && isStacked && renderedSeries.length > 0 ? renderStackTotalLabel(data, series) : undefined;
+	const stackTotalLabelIndex = renderedSeries.length - 1;
 
 	return (
 		<BarChart data={data} accessibilityLayer margin={margin}>
@@ -258,19 +260,19 @@ function buildBarChart(props: ResolvedProps) {
 				tickFormatter={labelFormatter}
 			/>
 			{children}
-			{series.map((s, i) => (
+			{renderedSeries.map((s, i) => (
 				<Bar
 					key={s.data_key}
 					dataKey={s.data_key}
 					fill={colorFor(s.data_key, i)}
-					stackId={getSeriesStackId(isStacked, s)}
-					radius={getBarRadius(isStacked, i, stackTotalSeriesIndex, s)}
+					stackId={isStacked ? 'stack' : undefined}
+					radius={getBarRadius(isStacked, i, renderedSeries.length)}
 					isAnimationActive={false}
 				>
 					{showDataLabels && !isStacked && (
 						<LabelList position='top' formatter={formatDataLabel} {...DATA_LABEL_PROPS} />
 					)}
-					{stackTotalLabel && i === stackTotalSeriesIndex && <LabelList content={stackTotalLabel} />}
+					{stackTotalLabel && i === stackTotalLabelIndex && <LabelList content={stackTotalLabel} />}
 				</Bar>
 			))}
 		</BarChart>
@@ -293,15 +295,17 @@ function buildAreaChart(props: ResolvedProps) {
 		showDataLabels,
 	} = props;
 	const isStacked = chartType === 'stacked_area';
-	const yAxisDomain = showDataLabels ? calculateYAxisDomain(data, series, chartType) : undefined;
-	const stackTotalSeriesIndex = showDataLabels && isStacked ? findStackTotalSeriesIndex(series) : -1;
-	const stackTotalLabel = stackTotalSeriesIndex >= 0 ? renderStackTotalLabel(data, series) : undefined;
+	const renderedSeries = getRenderedSeries(isStacked, series);
+	const yAxisDomain = showDataLabels ? calculateYAxisDomain(data, renderedSeries, chartType) : undefined;
+	const stackTotalLabel =
+		showDataLabels && isStacked && renderedSeries.length > 0 ? renderStackTotalLabel(data, series) : undefined;
+	const stackTotalLabelIndex = renderedSeries.length - 1;
 	const pointLabelContent = showDataLabels && !isStacked ? buildPointLabelContentBySeries(data, series) : new Map();
 
 	return (
 		<AreaChart data={data} accessibilityLayer margin={margin}>
 			<defs>
-				{series.map((s, i) => {
+				{renderedSeries.map((s, i) => {
 					const color = colorFor(s.data_key, i);
 					const gradientId = `grad-${i}`;
 					return (
@@ -334,18 +338,18 @@ function buildAreaChart(props: ResolvedProps) {
 				tickFormatter={labelFormatter}
 			/>
 			{children}
-			{series.map((s, i) => (
+			{renderedSeries.map((s, i) => (
 				<Area
 					key={s.data_key}
 					dataKey={s.data_key}
 					type='monotone'
 					stroke={colorFor(s.data_key, i)}
 					fill={`url(#grad-${i})`}
-					stackId={getSeriesStackId(isStacked, s)}
+					stackId={isStacked ? 'stack' : undefined}
 					isAnimationActive={false}
 				>
 					{showDataLabels && !isStacked && <LabelList content={pointLabelContent.get(s.data_key)} />}
-					{stackTotalLabel && i === stackTotalSeriesIndex && <LabelList content={stackTotalLabel} />}
+					{stackTotalLabel && i === stackTotalLabelIndex && <LabelList content={stackTotalLabel} />}
 				</Area>
 			))}
 		</AreaChart>
@@ -622,11 +626,7 @@ function calculateSeriesExtents(data: Record<string, unknown>[], series: display
 
 function calculateStackedChartExtents(data: Record<string, unknown>[], series: displayChart.SeriesConfig[]) {
 	const stackedSeries = series.filter((item) => !item.is_total);
-	const totalSeries = series.filter((item) => item.is_total);
-	const stackedExtents = stackedSeries.length > 0 ? calculateStackedExtents(data, stackedSeries) : null;
-	const totalExtents = calculateSeriesExtents(data, totalSeries);
-
-	return mergeExtents(stackedExtents, totalExtents);
+	return stackedSeries.length > 0 ? calculateStackedExtents(data, stackedSeries) : null;
 }
 
 function calculateStackedExtents(data: Record<string, unknown>[], series: displayChart.SeriesConfig[]) {
@@ -654,22 +654,6 @@ function calculateStackedExtents(data: Record<string, unknown>[], series: displa
 	return { min, max };
 }
 
-function mergeExtents(
-	first: { min: number; max: number } | null,
-	second: { min: number; max: number } | null,
-): { min: number; max: number } | null {
-	if (!first) {
-		return second;
-	}
-	if (!second) {
-		return first;
-	}
-	return {
-		min: Math.min(first.min, second.min),
-		max: Math.max(first.max, second.max),
-	};
-}
-
 function padYAxisDomain(min: number, max: number): [number, number] {
 	if (min === max) {
 		const padding = Math.max(Math.abs(max) * DATA_LABEL_DOMAIN_PADDING, 1);
@@ -680,29 +664,15 @@ function padYAxisDomain(min: number, max: number): [number, number] {
 	return [min < 0 ? min - padding : 0, max > 0 ? max + padding : 0];
 }
 
-function getSeriesStackId(isStacked: boolean, series: displayChart.SeriesConfig): string | undefined {
-	return isStacked && !series.is_total ? 'stack' : undefined;
+function getRenderedSeries(isStacked: boolean, series: displayChart.SeriesConfig[]): displayChart.SeriesConfig[] {
+	return isStacked ? series.filter((item) => !item.is_total) : series;
 }
 
-function getBarRadius(
-	isStacked: boolean,
-	index: number,
-	stackTotalSeriesIndex: number,
-	series: displayChart.SeriesConfig,
-): [number, number, number, number] {
-	if (!isStacked || series.is_total || stackTotalSeriesIndex === -1) {
+function getBarRadius(isStacked: boolean, index: number, seriesLength: number): [number, number, number, number] {
+	if (!isStacked) {
 		return [4, 4, 4, 4];
 	}
-	return index === stackTotalSeriesIndex ? [4, 4, 0, 0] : [0, 0, 0, 0];
-}
-
-function findStackTotalSeriesIndex(series: displayChart.SeriesConfig[]): number {
-	for (let i = series.length - 1; i >= 0; i--) {
-		if (!series[i].is_total) {
-			return i;
-		}
-	}
-	return -1;
+	return index === seriesLength - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0];
 }
 
 function sumStackValue(row: Record<string, unknown> | undefined, series: displayChart.SeriesConfig[]): number | null {

@@ -40,8 +40,35 @@ describe('buildChart data labels', () => {
 			}),
 		);
 
-		expect(html).toContain('>300</text>');
+		expect(html.match(/>300<\/text>/g)).toHaveLength(1);
 		expect(html).not.toContain('>600</text>');
+	});
+
+	it('does not render total series as stacked bar segments', () => {
+		const colors: Record<string, string> = {
+			new_sales: '#111111',
+			renewal_sales: '#222222',
+			total_sales: '#333333',
+		};
+		const html = renderChart(
+			buildChart({
+				data: [{ month: 'Jan', new_sales: 100, renewal_sales: 200, total_sales: 300 }],
+				chartType: 'stacked_bar',
+				xAxisKey: 'month',
+				xAxisType: 'category',
+				series: [
+					{ data_key: 'new_sales' },
+					{ data_key: 'renewal_sales' },
+					{ data_key: 'total_sales', is_total: true },
+				],
+				colorFor: (key) => colors[key],
+				showDataLabels: false,
+			}),
+		);
+
+		expect(html).toContain('fill="#111111"');
+		expect(html).toContain('fill="#222222"');
+		expect(html).not.toContain('fill="#333333"');
 	});
 
 	it('thins dense line chart labels while keeping the max value', () => {
