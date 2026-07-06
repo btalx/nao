@@ -33,6 +33,36 @@ describe('buildChart', () => {
 
 		expect(yAxis?.props.domain).toEqual([0, 60]);
 	});
+
+	it('uses stack totals for stacked area fallback bounds', () => {
+		const yAxis = getYAxis(
+			buildChart({
+				data: [{ name: 'A', costs: 60, revenue: 50 }],
+				chartType: 'stacked_area',
+				xAxisKey: 'name',
+				xAxisType: 'category',
+				series: [{ data_key: 'costs' }, { data_key: 'revenue' }],
+				yAxisMin: 0,
+			}),
+		);
+
+		expect(yAxis?.props.domain).toEqual([0, 110]);
+	});
+
+	it('uses individual values for plain area fallback bounds', () => {
+		const yAxis = getYAxis(
+			buildChart({
+				data: [{ name: 'A', costs: 60, revenue: 50 }],
+				chartType: 'area',
+				xAxisKey: 'name',
+				xAxisType: 'category',
+				series: [{ data_key: 'costs' }, { data_key: 'revenue' }],
+				yAxisMin: 0,
+			}),
+		);
+
+		expect(yAxis?.props.domain).toEqual([0, 60]);
+	});
 });
 
 function getYAxis(chart: ReactElement): ReactElement | undefined {

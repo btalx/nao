@@ -259,10 +259,8 @@ function buildAreaChart(props: ResolvedProps) {
 	} = props;
 	const isStacked = chartType === 'stacked_area';
 	const zeroBaseline = chartType !== 'line';
-	const axisValues = collectAxisValues(
-		data,
-		series.map((s) => s.data_key),
-	);
+	const dataKeys = series.map((s) => s.data_key);
+	const axisValues = isStacked ? collectStackedAxisValues(data, dataKeys) : collectAxisValues(data, dataKeys);
 
 	return (
 		<AreaChart data={data} accessibilityLayer margin={margin}>
