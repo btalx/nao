@@ -43,6 +43,7 @@ function ProjectTeamTabPage() {
 			name: u.name,
 			email: u.email,
 			role: u.role,
+			hasPassword: u.hasPassword,
 		})) ?? [];
 
 	const addUser = useMutation(trpc.user.addUserToProject.mutationOptions());
@@ -122,9 +123,11 @@ function ProjectTeamTabPage() {
 						isAdmin={isAdmin}
 						onEdit={setEditMember}
 						onRemove={setRemoveMember}
-						extraActions={(member) => (
-							<ResetPasswordAction onClick={() => setResetPasswordMember(member)} />
-						)}
+						extraActions={(member) =>
+							member.hasPassword ? (
+								<ResetPasswordAction onClick={() => setResetPasswordMember(member)} />
+							) : null
+						}
 					/>
 				)}
 			</SettingsCard>

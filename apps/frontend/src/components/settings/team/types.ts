@@ -5,4 +5,5 @@ export interface TeamMember {
 	name: string;
 	email: string;
 	role: UserRole;
+	hasPassword?: boolean;
 }

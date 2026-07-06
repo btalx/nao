@@ -68,6 +68,7 @@ function OrganizationPage() {
 			name: m.name,
 			email: m.email,
 			role: m.role as UserRole,
+			hasPassword: m.hasPassword,
 		})) ?? [];
 
 	const handleAdd = async (data: { email: string; name?: string }) => {
@@ -161,9 +162,11 @@ function OrganizationPage() {
 							isAdmin={isOrgAdmin}
 							onEdit={setEditMember}
 							onRemove={setRemoveMember}
-							extraActions={(member) => (
-								<ResetPasswordAction onClick={() => setResetPasswordMember(member)} />
-							)}
+							extraActions={(member) =>
+								member.hasPassword ? (
+									<ResetPasswordAction onClick={() => setResetPasswordMember(member)} />
+								) : null
+							}
 						/>
 					)}
 				</SettingsCard>

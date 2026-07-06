@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 
 import s from '../db/abstractSchema';
 import { db } from '../db/db';
@@ -13,6 +13,36 @@ export const getAccountById = async (userId: string): Promise<{ id: string; pass
 		.execute();
 
 	return account ?? null;
+};
+
+export const userHasPassword = async (userId: string): Promise<boolean> => {
+	const account = await getAccountById(userId);
+	return !!account?.password;
+};
+
+/**
+ * Returns the subset of the given user ids that own a password (credential)
+ * account. Users authenticated only through an identity provider (SSO) have no
+ * such account, so password reset does not apply to them.
+ */
+export const getUserIdsWithPassword = async (userIds: string[]): Promise<Set<string>> => {
+	if (userIds.length === 0) {
+		return new Set();
+	}
+
+	const rows = await db
+		.select({ userId: s.account.userId })
+		.from(s.account)
+		.where(
+			and(
+				inArray(s.account.userId, userIds),
+				eq(s.account.providerId, CREDENTIAL_PROVIDER_ID),
+				isNotNull(s.account.password),
+			),
+		)
+		.execute();
+
+	return new Set(rows.map((row) => row.userId));
 };
 
 export const updateAccountPassword = async (

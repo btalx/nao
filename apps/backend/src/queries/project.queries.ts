@@ -9,6 +9,7 @@ import dbConfig, { Dialect } from '../db/dbConfig';
 import { env, isCloud } from '../env';
 import type { ListProjectChatsResponse, ProjectChatsFacetKey, UserWithRole } from '../types/project';
 import { HandlerError } from '../utils/error';
+import { getUserIdsWithPassword } from './account.queries';
 
 export interface UserProjectWithRole {
 	project: DBProject;
@@ -140,7 +141,9 @@ export const listAllUsersWithRoles = async (projectId: string): Promise<UserWith
 		.where(eq(s.projectMember.projectId, projectId))
 		.execute();
 
-	return results;
+	const userIdsWithPassword = await getUserIdsWithPassword(results.map((result) => result.id));
+
+	return results.map((result) => ({ ...result, hasPassword: userIdsWithPassword.has(result.id) }));
 };
 
 export const getDefaultProject = async (): Promise<DBProject | null> => {

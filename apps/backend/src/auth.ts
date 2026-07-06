@@ -15,6 +15,7 @@ import type { JWTPayload } from 'jose';
 import { db } from './db/db';
 import dbConfig, { Dialect } from './db/dbConfig';
 import { env, isCloud, MCP_SERVER_URL } from './env';
+import * as accountQueries from './queries/account.queries';
 import * as orgQueries from './queries/organization.queries';
 import * as userQueries from './queries/user.queries';
 import { emailService } from './services/email';
@@ -176,6 +177,12 @@ async function createAuthInstance(baseURL: string) {
 			enabled: env.ENABLE_USER_LOGIN === true,
 			disableSignUp: disableEmailSignUp,
 			sendResetPassword: async ({ user, url }) => {
+				// Users authenticated only through an identity provider (SSO) have no
+				// password account, so we never surface a reset link for them. This
+				// also prevents them from creating a local password that would bypass SSO.
+				if (!(await accountQueries.userHasPassword(user.id))) {
+					return;
+				}
 				emailService.sendEmail(user.email, buildForgotPasswordEmail(user, url));
 			},
 		},
