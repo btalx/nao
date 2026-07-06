@@ -25,6 +25,7 @@ import { agentRoutes } from './routes/agent';
 import { analyticsRoutes } from './routes/analytics';
 import { authRoutes } from './routes/auth';
 import { authErrorRedirectRoutes } from './routes/auth-error-redirect';
+import { automationWebhookRoutes } from './routes/automation-webhook';
 import { brandingRoutes } from './routes/branding';
 import { chartRoutes } from './routes/chart';
 import { deployRoutes } from './routes/deploy';
@@ -32,6 +33,7 @@ import { embedStoryDownloadRoutes } from './routes/embed-story-download';
 import { githubRoutes } from './routes/github';
 import { gitlabRoutes } from './routes/gitlab';
 import { imageRoutes } from './routes/image';
+import { mcpOAuthRoutes } from './routes/mcp-oauth';
 import { slackRoutes } from './routes/slack';
 import { teamsRoutes } from './routes/teams';
 import { telegramRoutes } from './routes/telegram';
@@ -202,12 +204,20 @@ app.register(deployRoutes, {
 	prefix: '/api',
 });
 
+app.register(automationWebhookRoutes, {
+	prefix: '/api',
+});
+
 app.register(githubRoutes, {
 	prefix: '/api/github',
 });
 
 app.register(gitlabRoutes, {
 	prefix: '/api/gitlab',
+});
+
+app.register(mcpOAuthRoutes, {
+	prefix: '/api/mcp-oauth',
 });
 
 app.register(mcpServerRoutes, {
