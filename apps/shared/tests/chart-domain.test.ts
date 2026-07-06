@@ -96,5 +96,21 @@ describe('chart domain helpers', () => {
 				),
 			).toEqual([1, 2, 3]);
 		});
+
+		it('ignores missing cells before numeric conversion', () => {
+			expect(
+				collectAxisValues(
+					[
+						{ revenue: 1_000_000 },
+						{ revenue: null },
+						{ revenue: undefined },
+						{ revenue: '' },
+						{ revenue: '   ' },
+						{ revenue: 1_050_000 },
+					],
+					['revenue'],
+				),
+			).toEqual([1_000_000, 1_050_000]);
+		});
 	});
 });

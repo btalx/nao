@@ -30,7 +30,13 @@ export function computeNiceDomain(dataMin: number, dataMax: number): [number, nu
 }
 
 export function collectAxisValues(data: Record<string, unknown>[], dataKeys: string[]): number[] {
-	return data.flatMap((row) => dataKeys.map((key) => Number(row[key])).filter((value) => Number.isFinite(value)));
+	return data.flatMap((row) =>
+		dataKeys
+			.map((key) => row[key])
+			.filter((value) => !isEmptyAxisValue(value))
+			.map((value) => Number(value))
+			.filter((value) => Number.isFinite(value)),
+	);
 }
 
 export function resolveYAxisDomain(
@@ -71,6 +77,10 @@ function minOf(values: number[]): number {
 
 function maxOf(values: number[]): number {
 	return values.reduce((currentMax, value) => Math.max(currentMax, value), values[0] ?? 0);
+}
+
+function isEmptyAxisValue(value: unknown): boolean {
+	return value === null || value === undefined || (typeof value === 'string' && value.trim() === '');
 }
 
 function separateInvertedBounds(
