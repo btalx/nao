@@ -19,6 +19,7 @@ import {
 	YAxis,
 } from 'recharts';
 
+import { collectAxisValues, resolveYAxisDomain } from './chart-domain';
 import { type DateFormatSettings, formatDateValue, isIsoDateLike } from './date';
 import * as displayChart from './tools/display-chart';
 
@@ -69,6 +70,8 @@ export interface BuildChartProps {
 	margin?: { top?: number; right?: number; bottom?: number; left?: number };
 	title?: string;
 	maxXAxisTicks?: number;
+	yAxisMin?: number;
+	yAxisMax?: number;
 }
 
 /**
@@ -192,13 +195,27 @@ function buildBarChart(props: ResolvedProps) {
 		children,
 		margin,
 		xAxisInterval,
+		yAxisMin,
+		yAxisMax,
 	} = props;
 	const isStacked = chartType === 'stacked_bar';
+	const axisValues = collectAxisValues(
+		data,
+		series.map((s) => s.data_key),
+	);
 
 	return (
 		<BarChart data={data} accessibilityLayer margin={margin}>
 			{showGrid && <CartesianGrid horizontal vertical={false} strokeDasharray='3 3' />}
-			<YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={12} tickFormatter={formatYAxisTick} />
+			<YAxis
+				tick={AXIS_TICK}
+				tickLine={false}
+				axisLine={false}
+				minTickGap={12}
+				tickFormatter={formatYAxisTick}
+				domain={resolveYAxisDomain(yAxisMin, yAxisMax, axisValues, true)}
+				allowDataOverflow={yAxisMin !== undefined || yAxisMax !== undefined}
+			/>
 			<XAxis
 				dataKey={xAxisKey}
 				type={xAxisType}
@@ -239,8 +256,15 @@ function buildAreaChart(props: ResolvedProps) {
 		children,
 		margin,
 		xAxisInterval,
+		yAxisMin,
+		yAxisMax,
 	} = props;
 	const isStacked = chartType === 'stacked_area';
+	const zeroBaseline = chartType !== 'line';
+	const axisValues = collectAxisValues(
+		data,
+		series.map((s) => s.data_key),
+	);
 
 	return (
 		<AreaChart data={data} accessibilityLayer margin={margin}>
@@ -257,7 +281,15 @@ function buildAreaChart(props: ResolvedProps) {
 				})}
 			</defs>
 			{showGrid && <CartesianGrid horizontal vertical={false} strokeDasharray='3 3' />}
-			<YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={12} tickFormatter={formatYAxisTick} />
+			<YAxis
+				tick={AXIS_TICK}
+				tickLine={false}
+				axisLine={false}
+				minTickGap={12}
+				tickFormatter={formatYAxisTick}
+				domain={resolveYAxisDomain(yAxisMin, yAxisMax, axisValues, zeroBaseline)}
+				allowDataOverflow={yAxisMin !== undefined || yAxisMax !== undefined}
+			/>
 			<XAxis
 				dataKey={xAxisKey}
 				type={xAxisType}
@@ -287,7 +319,11 @@ function buildAreaChart(props: ResolvedProps) {
 }
 
 function buildScatterChart(props: ResolvedProps) {
-	const { data, xAxisKey, xAxisType, series, colorFor, showGrid, children, margin } = props;
+	const { data, xAxisKey, xAxisType, series, colorFor, showGrid, children, margin, yAxisMin, yAxisMax } = props;
+	const axisValues = collectAxisValues(
+		data,
+		series.map((s) => s.data_key),
+	);
 
 	return (
 		<ScatterChart data={data} accessibilityLayer margin={margin}>
@@ -300,7 +336,15 @@ function buildScatterChart(props: ResolvedProps) {
 				axisLine={false}
 				minTickGap={12}
 			/>
-			<YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={12} tickFormatter={formatYAxisTick} />
+			<YAxis
+				tick={AXIS_TICK}
+				tickLine={false}
+				axisLine={false}
+				minTickGap={12}
+				tickFormatter={formatYAxisTick}
+				domain={resolveYAxisDomain(yAxisMin, yAxisMax, axisValues, false)}
+				allowDataOverflow={yAxisMin !== undefined || yAxisMax !== undefined}
+			/>
 			{children}
 			{series.map((s, i) => (
 				<Scatter

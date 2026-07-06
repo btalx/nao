@@ -7,7 +7,10 @@ import { renderToString } from 'react-dom/server';
 import { createSvg, type LegendEntry, svgToPng } from '../utils/generate-chart';
 
 export interface RenderChartInput {
-	config: Pick<displayChart.Input, 'chart_type' | 'x_axis_key' | 'x_axis_type' | 'series' | 'title'>;
+	config: Pick<
+		displayChart.Input,
+		'chart_type' | 'x_axis_key' | 'x_axis_type' | 'series' | 'y_axis_min' | 'y_axis_max' | 'title'
+	>;
 	data: Record<string, unknown>[];
 	width?: number;
 	height?: number;
@@ -48,6 +51,8 @@ export function renderChartToSvg(input: RenderChartInput): string {
 		margin,
 		title: config.title,
 		maxXAxisTicks: Math.floor(width / maxLabelWidth),
+		yAxisMin: config.y_axis_min,
+		yAxisMax: config.y_axis_max,
 	});
 
 	const html = renderToString(React.cloneElement(chart, { width, height }));

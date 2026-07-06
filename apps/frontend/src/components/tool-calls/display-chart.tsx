@@ -277,6 +277,8 @@ export const DisplayChartToolCall = ({
 				series={config.series}
 				xAxisType={config.x_axis_type === 'number' ? 'number' : 'category'}
 				title={config.title}
+				yAxisMin={config.y_axis_min}
+				yAxisMax={config.y_axis_max}
 			/>
 		</div>
 	);
@@ -291,6 +293,8 @@ export interface ChartDisplayProps {
 	series: displayChart.SeriesConfig[];
 	title?: string;
 	showGrid?: boolean;
+	yAxisMin?: number;
+	yAxisMax?: number;
 }
 
 export const ChartDisplay = memo(function ChartDisplay({
@@ -302,6 +306,8 @@ export const ChartDisplay = memo(function ChartDisplay({
 	series,
 	title,
 	showGrid = true,
+	yAxisMin,
+	yAxisMax,
 }: ChartDisplayProps) {
 	const { visibleSeries, hiddenSeriesKeys, handleToggleSeriesVisibility } = useSeriesVisibility(series);
 	const dateFormat = useDateFormat();
@@ -371,6 +377,8 @@ export const ChartDisplay = memo(function ChartDisplay({
 				labelFormatter,
 				showGrid,
 				margin: { top: 0, right: 0, bottom: 0, left: 0 },
+				yAxisMin,
+				yAxisMax,
 				children: [
 					<ChartTooltip
 						key='tooltip'
@@ -398,6 +406,8 @@ export const ChartDisplay = memo(function ChartDisplay({
 			colorFor,
 			labelFormatter,
 			showGrid,
+			yAxisMin,
+			yAxisMax,
 			legendPayload,
 			handleToggleSeriesVisibility,
 			title,

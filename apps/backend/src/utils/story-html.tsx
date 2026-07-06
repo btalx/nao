@@ -155,6 +155,8 @@ function ChartBlock({ chart, queryData }: { chart: ParsedChartBlock; queryData: 
 			xAxisKey: chart.xAxisKey,
 			series: chart.series,
 			chartType: chart.chartType,
+			yAxisMin: chart.yAxisMin,
+			yAxisMax: chart.yAxisMax,
 		});
 		return (
 			<div style={{ margin: '16px 0' }}>
@@ -329,6 +331,8 @@ function toChartConfig(chart: ParsedChartBlock) {
 		x_axis_key: chart.xAxisKey,
 		x_axis_type: chart.xAxisType as displayChart.XAxisType | null,
 		series: chart.series,
+		y_axis_min: chart.yAxisMin,
+		y_axis_max: chart.yAxisMax,
 		title: chart.title,
 	};
 }

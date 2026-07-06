@@ -104,6 +104,11 @@ export function SystemPrompt({
 						is desired (similar to "line"). Use "stacked_area" to show how multiple series compose a total
 						over time (e.g. revenue by payment method, users by plan) — requires 2+ series and pivoted data.
 					</ListItem>,
+					<ListItem>
+						For display_chart y_axis_min/y_axis_max: use them to fix the Y-axis scale when needed; by
+						default, line and scatter charts auto-scale to a readable range rather than always starting at
+						zero.
+					</ListItem>,
 					...dialectToolCallRules,
 				]}
 			</List>

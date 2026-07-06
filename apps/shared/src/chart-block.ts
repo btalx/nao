@@ -12,7 +12,7 @@ export function escapeSingleQuotedStoryAttr(value: string): string {
 
 export type StoryChartBlockInput = Pick<
 	displayChart.Input,
-	'query_id' | 'chart_type' | 'x_axis_key' | 'x_axis_type' | 'series'
+	'query_id' | 'chart_type' | 'x_axis_key' | 'x_axis_type' | 'series' | 'y_axis_min' | 'y_axis_max'
 > & {
 	title?: displayChart.Input['title'];
 };
@@ -20,8 +20,10 @@ export type StoryChartBlockInput = Pick<
 export function buildStoryChartBlock(input: StoryChartBlockInput): string {
 	const xAxisTypeAttr =
 		input.x_axis_type != null ? ` x_axis_type="${escapeDoubleQuotedStoryAttr(input.x_axis_type)}"` : '';
+	const yMinAttr = input.y_axis_min !== undefined ? ` y_axis_min="${input.y_axis_min}"` : '';
+	const yMaxAttr = input.y_axis_max !== undefined ? ` y_axis_max="${input.y_axis_max}"` : '';
 	const seriesJson = escapeSingleQuotedStoryAttr(JSON.stringify(input.series));
 	const titleAttr =
 		input.title != null && input.title !== '' ? ` title="${escapeDoubleQuotedStoryAttr(input.title)}"` : '';
-	return `<chart query_id="${escapeDoubleQuotedStoryAttr(input.query_id)}" chart_type="${escapeDoubleQuotedStoryAttr(input.chart_type)}" x_axis_key="${escapeDoubleQuotedStoryAttr(input.x_axis_key)}"${xAxisTypeAttr} series='${seriesJson}'${titleAttr} />`;
+	return `<chart query_id="${escapeDoubleQuotedStoryAttr(input.query_id)}" chart_type="${escapeDoubleQuotedStoryAttr(input.chart_type)}" x_axis_key="${escapeDoubleQuotedStoryAttr(input.x_axis_key)}"${xAxisTypeAttr}${yMinAttr}${yMaxAttr} series='${seriesJson}'${titleAttr} />`;
 }
