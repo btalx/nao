@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { formatDate } from 'date-fns';
+import type { ForkMetadata, UIMessage } from '@nao/backend/chat';
 
 import { SidePanelProvider } from '@/contexts/side-panel';
 import { SidePanel } from '@/components/side-panel/side-panel';
@@ -17,6 +18,11 @@ import { useSidePanel } from '@/hooks/use-side-panel';
 import { trpc } from '@/main';
 import { useSession } from '@/lib/auth-client';
 
+type ChatReplayData = {
+	messages: UIMessage[];
+	forkMetadata?: ForkMetadata;
+};
+
 type ChatsReplayPanelProps = {
 	chatInfo: {
 		chatId: string;
@@ -28,20 +34,22 @@ type ChatsReplayPanelProps = {
 		toolErrorCount: number;
 	} | null;
 	onClose: () => void;
+	replayData?: ChatReplayData;
 };
 
-export function ChatsReplayPanel({ chatInfo, onClose }: ChatsReplayPanelProps) {
+export function ChatsReplayPanel({ chatInfo, onClose, replayData }: ChatsReplayPanelProps) {
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const chatReplayQuery = useQuery(
 		trpc.project.getChatReplay.queryOptions(
 			{ chatId: chatInfo?.chatId ?? '' },
 			{
-				enabled: !!chatInfo?.chatId,
+				enabled: !!chatInfo?.chatId && !replayData,
 			},
 		),
 	);
+	const chatReplayData = replayData ?? chatReplayQuery.data;
 
-	const contentReady = !!chatReplayQuery.data;
+	const contentReady = !!chatReplayData;
 	const {
 		goToPrevFeedback,
 		goToNextFeedback,
@@ -75,7 +83,7 @@ export function ChatsReplayPanel({ chatInfo, onClose }: ChatsReplayPanelProps) {
 					</span>
 				</div>
 				<div className='flex items-center gap-2'>
-					{chatInfo?.chatId && chatReplayQuery.data && (
+					{chatInfo?.chatId && chatReplayData && (
 						<InlineStatusBar
 							feedbackCurrent={feedbackCurrent}
 							feedbackTotal={feedbackTotal}
@@ -102,17 +110,14 @@ export function ChatsReplayPanel({ chatInfo, onClose }: ChatsReplayPanelProps) {
 					<div className='flex-1 overflow-auto p-4 text-sm text-muted-foreground'>
 						Select a chat to preview.
 					</div>
-				) : chatReplayQuery.isLoading ? (
+				) : !replayData && chatReplayQuery.isLoading ? (
 					<div className='flex-1 overflow-auto p-4 text-sm text-muted-foreground'>Loading chat…</div>
-				) : chatReplayQuery.isError ? (
+				) : !replayData && chatReplayQuery.isError ? (
 					<div className='flex-1 overflow-auto p-4 text-sm text-destructive'>Failed to load chat.</div>
-				) : chatReplayQuery.data ? (
+				) : chatReplayData ? (
 					<ChatViewProvider expandOnError={true}>
 						<ChatIdContext.Provider value={chatInfo.chatId}>
-							<ReadonlyAgentMessagesProvider
-								messages={chatReplayQuery.data.messages}
-								chatId={chatInfo.chatId}
-							>
+							<ReadonlyAgentMessagesProvider messages={chatReplayData.messages} chatId={chatInfo.chatId}>
 								<SidePanelProvider
 									isVisible={sidePanel.isVisible}
 									currentStorySlug={sidePanel.currentStorySlug}
@@ -124,8 +129,8 @@ export function ChatsReplayPanel({ chatInfo, onClose }: ChatsReplayPanelProps) {
 									<div ref={containerRef} className='flex h-full min-h-0'>
 										<div ref={scrollContainerRef} className='flex-1 overflow-auto p-4'>
 											<ChatMessagesReadonly
-												messages={chatReplayQuery.data.messages}
-												forkMetadata={chatReplayQuery.data.forkMetadata}
+												messages={chatReplayData.messages}
+												forkMetadata={chatReplayData.forkMetadata}
 											/>
 										</div>
 										{sidePanel.content && (

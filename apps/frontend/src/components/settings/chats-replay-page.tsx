@@ -1,22 +1,25 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getRouteApi } from '@tanstack/react-router';
 import { getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import type { ColumnFiltersState, PaginationState, SortingState, VisibilityState } from '@tanstack/react-table';
 
 import type { ProjectChatListItem, UpdatedAtFilter } from '@nao/shared/types';
+import type { UIMessage } from '@nao/backend/chat';
 import { getChatsReplayColumns } from '@/components/settings/chats-replay-columns';
 import { ChatsReplayPanel } from '@/components/settings/chats-replay-panel';
 import { ChatsReplayTable } from '@/components/settings/chats-replay-table';
 import { ChatsReplayToolbar } from '@/components/settings/chats-replay-toolbar';
 import { SettingsCard } from '@/components/ui/settings-card';
+import { getActiveProjectId, setActiveProjectId } from '@/lib/active-project';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/main';
 
 const routeApi = getRouteApi('/_sidebar-layout/settings/chats-replay');
 
 export function ChatsReplayPage() {
+	const queryClient = useQueryClient();
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [globalFilter, setGlobalFilter] = useState('');
 	const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -34,9 +37,19 @@ export function ChatsReplayPage() {
 	const [isPanelOpen, setIsPanelOpen] = useState(false);
 
 	const deepLinkChatQuery = useQuery({
-		...trpc.project.getChatReplay.queryOptions({ chatId: deepLinkChatId ?? '' }),
+		...trpc.project.getSharedChatReplay.queryOptions({ chatId: deepLinkChatId ?? '' }),
 		enabled: !!deepLinkChatId,
 	});
+
+	useEffect(() => {
+		const projectId = deepLinkChatQuery.data?.projectId;
+		if (!projectId || getActiveProjectId() === projectId) {
+			return;
+		}
+
+		setActiveProjectId(projectId);
+		queryClient.invalidateQueries();
+	}, [deepLinkChatQuery.data?.projectId, queryClient]);
 
 	const openChatPanel = useCallback((chat: ProjectChatListItem) => {
 		setSelectedChat(chat);
@@ -77,6 +90,7 @@ export function ChatsReplayPage() {
 
 	const projectChatsQuery = useQuery({
 		...trpc.project.getProjectChats.queryOptions(queryInput),
+		enabled: !deepLinkChatId,
 		placeholderData: keepPreviousData,
 	});
 	const chats = projectChatsQuery.data?.chats ?? [];
@@ -118,19 +132,28 @@ export function ChatsReplayPage() {
 				toolErrorCount: selectedChat.toolErrorCount,
 			}
 		: null;
-	const deepLinkChatInfo = deepLinkChatId
-		? {
-				chatId: deepLinkChatId,
-				chatOwnerId: deepLinkChatQuery.data?.ownerId ?? '',
-				userName: deepLinkChatQuery.data?.ownerName ?? '—',
-				updatedAt: deepLinkChatQuery.data?.updatedAt ?? Date.now(),
-				feedbackCount: 0,
-				feedbackText: '',
-				toolErrorCount: 0,
-			}
-		: null;
+	const deepLinkChatInfo =
+		deepLinkChatId && deepLinkChatQuery.data
+			? {
+					chatId: deepLinkChatId,
+					chatOwnerId: deepLinkChatQuery.data.ownerId ?? '',
+					userName: deepLinkChatQuery.data.ownerName ?? '—',
+					updatedAt: deepLinkChatQuery.data.updatedAt,
+					feedbackCount: getFeedbackCount(deepLinkChatQuery.data.messages),
+					feedbackText: getFeedbackText(deepLinkChatQuery.data.messages),
+					toolErrorCount: 0,
+				}
+			: null;
 	const panelChatInfo = selectedChatInfo ?? deepLinkChatInfo;
 	const isPanelVisible = isPanelOpen || !!deepLinkChatId;
+
+	if (deepLinkChatId && deepLinkChatQuery.isLoading) {
+		return <DeepLinkStatus message='Loading chat replay…' />;
+	}
+
+	if (deepLinkChatId && deepLinkChatQuery.isError) {
+		return <DeepLinkStatus message={getDeepLinkErrorMessage(deepLinkChatQuery.error)} isError />;
+	}
 
 	return (
 		<div className='flex w-full h-full min-h-0 bg-background'>
@@ -158,8 +181,43 @@ export function ChatsReplayPage() {
 					</SettingsCard>
 				</div>
 			) : (
-				<ChatsReplayPanel chatInfo={panelChatInfo} onClose={closeChatPanel} />
+				<ChatsReplayPanel
+					chatInfo={panelChatInfo}
+					onClose={closeChatPanel}
+					replayData={deepLinkChatQuery.data}
+				/>
 			)}
 		</div>
+	);
+}
+
+function DeepLinkStatus({ message, isError = false }: { message: string; isError?: boolean }) {
+	return (
+		<div className='flex w-full h-full min-h-0 bg-background p-4'>
+			<SettingsCard rootClassName='w-full' className='flex items-center justify-center'>
+				<div className={cn('text-sm text-muted-foreground', isError && 'text-destructive')}>{message}</div>
+			</SettingsCard>
+		</div>
+	);
+}
+
+function getDeepLinkErrorMessage(error: unknown) {
+	const code = (error as { data?: { code?: string } }).data?.code;
+	if (code === 'NOT_FOUND') {
+		return 'Chat not found';
+	}
+	if (code === 'FORBIDDEN') {
+		return 'You need admin access to this project to view this chat';
+	}
+	return 'Failed to load chat replay';
+}
+
+function getFeedbackCount(messages: UIMessage[]) {
+	return messages.filter((message) => message.feedback).length;
+}
+
+function getFeedbackText(messages: UIMessage[]) {
+	return (
+		messages.map((message) => message.feedback?.explanation?.trim()).find((text): text is string => !!text) ?? ''
 	);
 }

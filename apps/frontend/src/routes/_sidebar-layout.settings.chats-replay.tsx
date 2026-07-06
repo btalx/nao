@@ -7,6 +7,12 @@ export const Route = createFileRoute('/_sidebar-layout/settings/chats-replay')({
 	validateSearch: (search: Record<string, unknown>): { chatId?: string } => ({
 		chatId: typeof search.chatId === 'string' ? search.chatId : undefined,
 	}),
-	beforeLoad: requireContextAdminOrAdmin,
+	beforeLoad: ({ search }) => {
+		if (search.chatId) {
+			return;
+		}
+
+		return requireContextAdminOrAdmin();
+	},
 	component: ChatsReplayPage,
 });

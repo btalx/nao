@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useSession } from '@/lib/auth-client';
 import { trpc } from '@/main';
 import { useMemberPicker, useCopyWithFeedback } from '@/hooks/use-share-dialog';
+import { usePermissions } from '@/hooks/use-permissions';
 
 interface ShareChatDialogProps {
 	open: boolean;
@@ -158,6 +159,7 @@ function CreateShareDialog({ open, onOpenChange, chatId }: ShareChatDialogProps)
 							onToggleUser={toggleUser}
 						/>
 					)}
+					<AdminReplayLinkAction chatId={chatId} />
 				</div>
 
 				<div className='flex justify-end gap-2'>
@@ -280,6 +282,7 @@ function ManageShareDialog({
 							onToggleUser={toggleUser}
 						/>
 					)}
+					<AdminReplayLinkAction chatId={chatId} />
 				</div>
 
 				<ManageShareFooter
@@ -295,5 +298,31 @@ function ManageShareDialog({
 				/>
 			</DialogContent>
 		</Dialog>
+	);
+}
+
+function AdminReplayLinkAction({ chatId }: { chatId: string }) {
+	const { canShare } = usePermissions();
+	const { isCopied, copy } = useCopyWithFeedback();
+
+	const handleCopyReplayLink = useCallback(() => {
+		copy(`${window.location.origin}/settings/chats-replay?chatId=${encodeURIComponent(chatId)}`);
+	}, [chatId, copy]);
+
+	if (!canShare) {
+		return null;
+	}
+
+	return (
+		<div className='flex items-center justify-between gap-3 rounded-lg border p-3'>
+			<div className='flex flex-col'>
+				<p className='text-md font-medium'>Admin replay link</p>
+				<p className='text-xs text-muted-foreground'>Opens this chat in Chats Replay for project admins.</p>
+			</div>
+			<Button variant='outline' className='shrink-0 gap-1.5 rounded-full' onClick={handleCopyReplayLink}>
+				{isCopied ? <Check className='size-3.5' /> : <LinkIcon className='size-3.5' />}
+				<span>{isCopied ? 'Copied!' : 'Copy link for admins'}</span>
+			</Button>
+		</div>
 	);
 }

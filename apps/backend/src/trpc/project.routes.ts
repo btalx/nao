@@ -31,11 +31,25 @@ import {
 	projectProtectedProcedure,
 	protectedProcedure,
 	publicProcedure,
+	resourceProjectProcedure,
 } from './trpc';
 
 const isoDateString = z.string().refine(isValidIsoDateString, {
 	message: 'Must be a valid YYYY-MM-DD date',
 });
+
+const sharedChatReplayProcedure = resourceProjectProcedure('chatId', chatQueries.getChatInfo, 'Chat').use(
+	async ({ ctx, next }) => {
+		if (ctx.userRole !== 'admin' && ctx.userRole !== 'context_admin') {
+			throw new TRPCError({
+				code: 'FORBIDDEN',
+				message: 'Only admins or context admins can perform this action',
+			});
+		}
+
+		return next({ ctx });
+	},
+);
 
 export const projectRoutes = {
 	listForCurrentUser: protectedProcedure.query(async ({ ctx }) => {
@@ -852,6 +866,18 @@ export const projectRoutes = {
 
 			const ownerName = ownerId ? await userQueries.getUserName(ownerId) : null;
 			return { ...chat, ownerId: ownerId ?? null, ownerName };
+		}),
+
+	getSharedChatReplay: sharedChatReplayProcedure
+		.input(z.object({ chatId: z.string() }))
+		.query(async ({ input, ctx }) => {
+			const [chat, ownerId] = await chatQueries.getChat(input.chatId, { includeFeedback: true });
+			if (!chat) {
+				throw new TRPCError({ code: 'NOT_FOUND', message: `Chat with id ${input.chatId} not found.` });
+			}
+
+			const ownerName = ownerId ? await userQueries.getUserName(ownerId) : null;
+			return { ...chat, projectId: ctx.resource.projectId, ownerId: ownerId ?? null, ownerName };
 		}),
 
 	getEnvVars: adminProtectedProcedure.query(async ({ ctx }) => {
