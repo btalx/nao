@@ -6,6 +6,7 @@ import {
 	BarChart,
 	CartesianGrid,
 	Customized,
+	LabelList,
 	Pie,
 	PieChart,
 	PolarAngleAxis,
@@ -25,6 +26,14 @@ import * as displayChart from './tools/display-chart';
 export const DEFAULT_COLORS = ['#104e64', '#f54900', '#009689', '#ffb900', '#fe9a00'];
 
 const AXIS_TICK = { fontSize: 12 };
+const DATA_LABEL_PROPS = {
+	fill: 'var(--foreground, #111827)',
+	fontSize: 11,
+	fontFamily: 'system-ui, sans-serif',
+};
+const DATA_LABEL_MARGIN_TOP = 18;
+const DATA_LABEL_DOMAIN_PADDING = 0.1;
+const MAX_LINE_AREA_DATA_LABELS = 12;
 
 export function labelize(key: unknown, dateFormat?: DateFormatSettings | null): string {
 	const str = String(key);
@@ -52,6 +61,11 @@ export function formatYAxisTick(value: number): string {
 	return formatCompactNumber(value);
 }
 
+export function formatDataLabel(value: unknown): string {
+	const number = toFiniteNumber(value);
+	return number == null ? '' : formatCompactNumber(number);
+}
+
 export function defaultColorFor(_key: string, index: number): string {
 	return DEFAULT_COLORS[index % DEFAULT_COLORS.length];
 }
@@ -69,6 +83,7 @@ export interface BuildChartProps {
 	margin?: { top?: number; right?: number; bottom?: number; left?: number };
 	title?: string;
 	maxXAxisTicks?: number;
+	showDataLabels?: boolean;
 }
 
 /**
@@ -132,7 +147,7 @@ function buildResolved(props: BuildChartProps) {
 		colorFor,
 		labelFormatter,
 		xAxisInterval,
-		margin: props.title ? { ...props.margin, top: (props.margin?.top ?? 0) + 30 } : props.margin,
+		margin: buildChartMargin(props),
 		children: titleChild ? [titleChild, ...(props.children ?? [])] : props.children,
 	};
 	return resolved;
@@ -140,6 +155,26 @@ function buildResolved(props: BuildChartProps) {
 
 type ResolvedProps = BuildChartProps &
 	Required<Pick<BuildChartProps, 'colorFor' | 'labelFormatter'>> & { xAxisInterval?: number };
+
+function buildChartMargin(props: BuildChartProps) {
+	const titleTop = props.title ? 30 : 0;
+	const labelsTop = shouldReserveDataLabelHeadroom(props) ? DATA_LABEL_MARGIN_TOP : 0;
+	if (titleTop === 0 && labelsTop === 0) {
+		return props.margin;
+	}
+	return { ...props.margin, top: (props.margin?.top ?? 0) + titleTop + labelsTop };
+}
+
+function shouldReserveDataLabelHeadroom(props: BuildChartProps): boolean {
+	return (
+		props.showDataLabels === true &&
+		(props.chartType === 'bar' ||
+			props.chartType === 'stacked_bar' ||
+			props.chartType === 'line' ||
+			props.chartType === 'area' ||
+			props.chartType === 'stacked_area')
+	);
+}
 
 function buildKpiCard(props: ResolvedProps) {
 	const { data, series } = props;
@@ -192,13 +227,24 @@ function buildBarChart(props: ResolvedProps) {
 		children,
 		margin,
 		xAxisInterval,
+		showDataLabels,
 	} = props;
 	const isStacked = chartType === 'stacked_bar';
+	const yAxisDomain = showDataLabels ? calculateYAxisDomain(data, series, chartType) : undefined;
+	const stackTotalSeriesIndex = showDataLabels && isStacked ? findStackTotalSeriesIndex(series) : -1;
+	const stackTotalLabel = stackTotalSeriesIndex >= 0 ? renderStackTotalLabel(data, series) : undefined;
 
 	return (
 		<BarChart data={data} accessibilityLayer margin={margin}>
 			{showGrid && <CartesianGrid horizontal vertical={false} strokeDasharray='3 3' />}
-			<YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={12} tickFormatter={formatYAxisTick} />
+			<YAxis
+				tick={AXIS_TICK}
+				tickLine={false}
+				axisLine={false}
+				minTickGap={12}
+				tickFormatter={formatYAxisTick}
+				domain={yAxisDomain}
+			/>
 			<XAxis
 				dataKey={xAxisKey}
 				type={xAxisType}
@@ -217,10 +263,15 @@ function buildBarChart(props: ResolvedProps) {
 					key={s.data_key}
 					dataKey={s.data_key}
 					fill={colorFor(s.data_key, i)}
-					stackId={isStacked ? 'stack' : undefined}
-					radius={isStacked ? (i === series.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]) : [4, 4, 4, 4]}
+					stackId={getSeriesStackId(isStacked, s)}
+					radius={getBarRadius(isStacked, i, stackTotalSeriesIndex, s)}
 					isAnimationActive={false}
-				/>
+				>
+					{showDataLabels && !isStacked && (
+						<LabelList position='top' formatter={formatDataLabel} {...DATA_LABEL_PROPS} />
+					)}
+					{stackTotalLabel && i === stackTotalSeriesIndex && <LabelList content={stackTotalLabel} />}
+				</Bar>
 			))}
 		</BarChart>
 	);
@@ -239,8 +290,13 @@ function buildAreaChart(props: ResolvedProps) {
 		children,
 		margin,
 		xAxisInterval,
+		showDataLabels,
 	} = props;
 	const isStacked = chartType === 'stacked_area';
+	const yAxisDomain = showDataLabels ? calculateYAxisDomain(data, series, chartType) : undefined;
+	const stackTotalSeriesIndex = showDataLabels && isStacked ? findStackTotalSeriesIndex(series) : -1;
+	const stackTotalLabel = stackTotalSeriesIndex >= 0 ? renderStackTotalLabel(data, series) : undefined;
+	const pointLabelContent = showDataLabels && !isStacked ? buildPointLabelContentBySeries(data, series) : new Map();
 
 	return (
 		<AreaChart data={data} accessibilityLayer margin={margin}>
@@ -257,7 +313,14 @@ function buildAreaChart(props: ResolvedProps) {
 				})}
 			</defs>
 			{showGrid && <CartesianGrid horizontal vertical={false} strokeDasharray='3 3' />}
-			<YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={12} tickFormatter={formatYAxisTick} />
+			<YAxis
+				tick={AXIS_TICK}
+				tickLine={false}
+				axisLine={false}
+				minTickGap={12}
+				tickFormatter={formatYAxisTick}
+				domain={yAxisDomain}
+			/>
 			<XAxis
 				dataKey={xAxisKey}
 				type={xAxisType}
@@ -278,9 +341,12 @@ function buildAreaChart(props: ResolvedProps) {
 					type='monotone'
 					stroke={colorFor(s.data_key, i)}
 					fill={`url(#grad-${i})`}
-					stackId={isStacked ? 'stack' : undefined}
+					stackId={getSeriesStackId(isStacked, s)}
 					isAnimationActive={false}
-				/>
+				>
+					{showDataLabels && !isStacked && <LabelList content={pointLabelContent.get(s.data_key)} />}
+					{stackTotalLabel && i === stackTotalSeriesIndex && <LabelList content={stackTotalLabel} />}
+				</Area>
 			))}
 		</AreaChart>
 	);
@@ -384,4 +450,288 @@ function renderPieLabel(labelFormatter: (v: string) => string) {
 			{`${labelFormatter(String(name))}: ${formatCompactNumber(value)}`}
 		</text>
 	);
+}
+
+type LabelCoordinate = number | string | undefined;
+
+interface StackTotalLabelProps {
+	x?: LabelCoordinate;
+	y?: LabelCoordinate;
+	width?: LabelCoordinate;
+	index?: number;
+}
+
+interface PointLabelProps {
+	x?: LabelCoordinate;
+	y?: LabelCoordinate;
+	value?: unknown;
+	index?: number;
+}
+
+function buildPointLabelContentBySeries(data: Record<string, unknown>[], series: displayChart.SeriesConfig[]) {
+	return new Map(series.map((item) => [item.data_key, renderPointLabel(getLabeledIndices(data, item.data_key))]));
+}
+
+function renderPointLabel(labeledIndices: Set<number>) {
+	return ({ x, y, value, index }: PointLabelProps) => {
+		const labelX = toFiniteNumber(x);
+		const labelY = toFiniteNumber(y);
+		if (labelX == null || labelY == null || index == null || !labeledIndices.has(index)) {
+			return null;
+		}
+
+		const label = formatDataLabel(value);
+		if (!label) {
+			return null;
+		}
+
+		return (
+			<text x={labelX} y={labelY - 6} textAnchor='middle' dominantBaseline='alphabetic' {...DATA_LABEL_PROPS}>
+				{label}
+			</text>
+		);
+	};
+}
+
+function getLabeledIndices(
+	data: Record<string, unknown>[],
+	dataKey: string,
+	maxLabels = MAX_LINE_AREA_DATA_LABELS,
+): Set<number> {
+	if (data.length <= maxLabels) {
+		return new Set(data.map((_, index) => index));
+	}
+
+	const points = getFiniteSeriesPoints(data, dataKey);
+	const globalMax = getGlobalMaxPoint(points);
+	if (globalMax == null) {
+		return new Set();
+	}
+
+	const peaks = getLocalMaximumPoints(points);
+	if (peaks.length === 0) {
+		return new Set([globalMax.index]);
+	}
+
+	const peakByIndex = new Map(peaks.map((point) => [point.index, point]));
+	peakByIndex.set(globalMax.index, globalMax);
+
+	const selected = Array.from(peakByIndex.values())
+		.sort((a, b) => b.value - a.value || a.index - b.index)
+		.slice(0, maxLabels)
+		.sort((a, b) => a.index - b.index);
+	return new Set(selected.map((point) => point.index));
+}
+
+interface SeriesPoint {
+	index: number;
+	value: number;
+}
+
+function getFiniteSeriesPoints(data: Record<string, unknown>[], dataKey: string): SeriesPoint[] {
+	return data.flatMap((row, index) => {
+		const value = toFiniteNumber(row[dataKey]);
+		return value == null ? [] : [{ index, value }];
+	});
+}
+
+function getGlobalMaxPoint(points: SeriesPoint[]): SeriesPoint | null {
+	return points.reduce<SeriesPoint | null>((maxPoint, point) => {
+		if (maxPoint == null || point.value > maxPoint.value) {
+			return point;
+		}
+		return maxPoint;
+	}, null);
+}
+
+function getLocalMaximumPoints(points: SeriesPoint[]): SeriesPoint[] {
+	const peaks: SeriesPoint[] = [];
+	let runStart = 0;
+
+	while (runStart < points.length) {
+		let runEnd = runStart;
+		while (runEnd + 1 < points.length && points[runEnd + 1].value === points[runStart].value) {
+			runEnd += 1;
+		}
+
+		const value = points[runStart].value;
+		const left = runStart > 0 ? points[runStart - 1].value : null;
+		const right = runEnd + 1 < points.length ? points[runEnd + 1].value : null;
+		if ((left == null || value > left) && (right == null || value > right)) {
+			peaks.push(points[runStart]);
+		}
+
+		runStart = runEnd + 1;
+	}
+
+	return peaks;
+}
+
+function renderStackTotalLabel(data: Record<string, unknown>[], series: displayChart.SeriesConfig[]) {
+	return ({ x, y, width, index }: StackTotalLabelProps) => {
+		const labelX = getCenteredLabelX(x, width);
+		const labelY = toFiniteNumber(y);
+		if (labelX == null || labelY == null || index == null) {
+			return null;
+		}
+
+		const total = sumStackValue(data[index], series);
+		if (total == null) {
+			return null;
+		}
+
+		return (
+			<text x={labelX} y={labelY - 6} textAnchor='middle' dominantBaseline='alphabetic' {...DATA_LABEL_PROPS}>
+				{formatCompactNumber(total)}
+			</text>
+		);
+	};
+}
+
+function calculateYAxisDomain(
+	data: Record<string, unknown>[],
+	series: displayChart.SeriesConfig[],
+	chartType: displayChart.ChartType,
+): [number, number] | undefined {
+	const extents =
+		chartType === 'stacked_bar' || chartType === 'stacked_area'
+			? calculateStackedChartExtents(data, series)
+			: calculateSeriesExtents(data, series);
+	if (!extents) {
+		return undefined;
+	}
+	return padYAxisDomain(extents.min, extents.max);
+}
+
+function calculateSeriesExtents(data: Record<string, unknown>[], series: displayChart.SeriesConfig[]) {
+	let min = Infinity;
+	let max = -Infinity;
+
+	for (const row of data) {
+		for (const item of series) {
+			const value = toFiniteNumber(row[item.data_key]);
+			if (value != null) {
+				min = Math.min(min, value);
+				max = Math.max(max, value);
+			}
+		}
+	}
+
+	return min === Infinity ? null : { min, max };
+}
+
+function calculateStackedChartExtents(data: Record<string, unknown>[], series: displayChart.SeriesConfig[]) {
+	const stackedSeries = series.filter((item) => !item.is_total);
+	const totalSeries = series.filter((item) => item.is_total);
+	const stackedExtents = stackedSeries.length > 0 ? calculateStackedExtents(data, stackedSeries) : null;
+	const totalExtents = calculateSeriesExtents(data, totalSeries);
+
+	return mergeExtents(stackedExtents, totalExtents);
+}
+
+function calculateStackedExtents(data: Record<string, unknown>[], series: displayChart.SeriesConfig[]) {
+	let min = 0;
+	let max = 0;
+
+	for (const row of data) {
+		let positive = 0;
+		let negative = 0;
+		for (const item of series) {
+			const value = toFiniteNumber(row[item.data_key]);
+			if (value == null) {
+				continue;
+			}
+			if (value >= 0) {
+				positive += value;
+			} else {
+				negative += value;
+			}
+		}
+		min = Math.min(min, negative);
+		max = Math.max(max, positive);
+	}
+
+	return { min, max };
+}
+
+function mergeExtents(
+	first: { min: number; max: number } | null,
+	second: { min: number; max: number } | null,
+): { min: number; max: number } | null {
+	if (!first) {
+		return second;
+	}
+	if (!second) {
+		return first;
+	}
+	return {
+		min: Math.min(first.min, second.min),
+		max: Math.max(first.max, second.max),
+	};
+}
+
+function padYAxisDomain(min: number, max: number): [number, number] {
+	if (min === max) {
+		const padding = Math.max(Math.abs(max) * DATA_LABEL_DOMAIN_PADDING, 1);
+		return [Math.min(0, min - padding), Math.max(0, max + padding)];
+	}
+
+	const padding = (max - min) * DATA_LABEL_DOMAIN_PADDING;
+	return [min < 0 ? min - padding : 0, max > 0 ? max + padding : 0];
+}
+
+function getSeriesStackId(isStacked: boolean, series: displayChart.SeriesConfig): string | undefined {
+	return isStacked && !series.is_total ? 'stack' : undefined;
+}
+
+function getBarRadius(
+	isStacked: boolean,
+	index: number,
+	stackTotalSeriesIndex: number,
+	series: displayChart.SeriesConfig,
+): [number, number, number, number] {
+	if (!isStacked || series.is_total || stackTotalSeriesIndex === -1) {
+		return [4, 4, 4, 4];
+	}
+	return index === stackTotalSeriesIndex ? [4, 4, 0, 0] : [0, 0, 0, 0];
+}
+
+function findStackTotalSeriesIndex(series: displayChart.SeriesConfig[]): number {
+	for (let i = series.length - 1; i >= 0; i--) {
+		if (!series[i].is_total) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+function sumStackValue(row: Record<string, unknown> | undefined, series: displayChart.SeriesConfig[]): number | null {
+	if (!row) {
+		return null;
+	}
+
+	const values = series.filter((s) => !s.is_total).map((s) => toFiniteNumber(row[s.data_key]));
+	const numericValues = values.filter((value): value is number => value != null);
+	return numericValues.length > 0 ? numericValues.reduce((sum, value) => sum + value, 0) : null;
+}
+
+function getCenteredLabelX(x: LabelCoordinate, width: LabelCoordinate): number | null {
+	const labelX = toFiniteNumber(x);
+	if (labelX == null) {
+		return null;
+	}
+
+	const labelWidth = toFiniteNumber(width);
+	return labelWidth == null ? labelX : labelX + labelWidth / 2;
+}
+
+function toFiniteNumber(value: unknown): number | null {
+	if (typeof value === 'number') {
+		return Number.isFinite(value) ? value : null;
+	}
+	if (typeof value === 'string' && value.trim() !== '') {
+		const parsed = Number(value);
+		return Number.isFinite(parsed) ? parsed : null;
+	}
+	return null;
 }
