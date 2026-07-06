@@ -6,6 +6,7 @@ import s from '../src/db/abstractSchema';
 import { db } from '../src/db/db';
 import { getProjectLlmConfigByProvider, upsertProjectLlmConfig } from '../src/queries/project-llm-config.queries';
 import type { ModelSettingsMap } from '../src/types/llm';
+import { getDefaultModelId, getProjectAvailableModels } from '../src/utils/llm';
 
 const TEST_DB_PATH = vi.hoisted(() => './model-settings-test.sqlite');
 
@@ -125,5 +126,51 @@ describe('project_llm_config model settings round-trip (sqlite)', () => {
 		});
 
 		expect(created.modelSettings).toEqual({});
+	});
+
+	it('resolves an empty enabled model list like an explicit provider default', async () => {
+		const implicitProjectId = `${projectId}-implicit-default`;
+		const explicitProjectId = `${projectId}-explicit-default`;
+		const defaultModelId = getDefaultModelId('anthropic');
+		await db.insert(s.project).values([
+			{
+				id: implicitProjectId,
+				name: 'Implicit Default Model Test',
+				type: 'local',
+				path: '/tmp/implicit-default-model-test',
+			},
+			{
+				id: explicitProjectId,
+				name: 'Explicit Default Model Test',
+				type: 'local',
+				path: '/tmp/explicit-default-model-test',
+			},
+		]);
+		await upsertProjectLlmConfig({
+			projectId: implicitProjectId,
+			provider: 'anthropic',
+			apiKey: 'test-key',
+			enabledModels: [],
+			customModels: [],
+			baseUrl: null,
+		});
+		await upsertProjectLlmConfig({
+			projectId: explicitProjectId,
+			provider: 'anthropic',
+			apiKey: 'test-key',
+			enabledModels: [defaultModelId],
+			customModels: [],
+			baseUrl: null,
+		});
+
+		const implicitModels = (await getProjectAvailableModels(implicitProjectId)).filter(
+			(m) => m.provider === 'anthropic',
+		);
+		const explicitModels = (await getProjectAvailableModels(explicitProjectId)).filter(
+			(m) => m.provider === 'anthropic',
+		);
+
+		expect(implicitModels).toEqual(explicitModels);
+		expect(implicitModels).toEqual([expect.objectContaining({ provider: 'anthropic', modelId: defaultModelId })]);
 	});
 });

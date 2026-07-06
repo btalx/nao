@@ -4,6 +4,7 @@ import { Check, ChevronDown, MoreHorizontal, Plus, X } from 'lucide-react';
 import { getDefaultModelId, getModelParameterSpec, getProviderAuth } from '@nao/backend/provider-meta';
 import { CustomModelDialog } from './custom-model-dialog';
 import { ModelParametersDialog } from './model-parameters-dialog';
+import { applySavedModelSettings } from './model-settings-overrides';
 import type { CustomModelMetadata, ModelSettingsMap } from '@nao/backend/llm';
 import type { LlmProvider } from '@nao/shared/types';
 import { Button } from '@/components/ui/button';
@@ -391,10 +392,14 @@ export function LlmProviderForm({
 						if (!editingCustomModelId) {
 							return;
 						}
-						form.setFieldValue('modelSettings', {
-							...form.getFieldValue('modelSettings'),
-							[editingCustomModelId]: settings,
+						const next = applySavedModelSettings({
+							provider,
+							enabledModels: form.getFieldValue('enabledModels'),
+							modelSettings: form.getFieldValue('modelSettings'),
+							modelId: editingCustomModelId,
+							settings,
 						});
+						form.setFieldValue('modelSettings', next.modelSettings);
 					}}
 				/>
 			)}
@@ -423,7 +428,18 @@ export function LlmProviderForm({
 							if (!editingModelParamsId) {
 								return;
 							}
-							field.handleChange({ ...field.state.value, [editingModelParamsId]: settings });
+							const enabledModels = form.getFieldValue('enabledModels');
+							const next = applySavedModelSettings({
+								provider,
+								enabledModels,
+								modelSettings: field.state.value,
+								modelId: editingModelParamsId,
+								settings,
+							});
+							if (next.enabledModels !== enabledModels) {
+								form.setFieldValue('enabledModels', next.enabledModels);
+							}
+							field.handleChange(next.modelSettings);
 						}}
 					/>
 				);
