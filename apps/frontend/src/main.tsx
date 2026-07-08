@@ -10,6 +10,7 @@ import superjson from 'superjson';
 import { PostHogProvider } from './contexts/posthog.provider';
 import { ThemeProvider } from './contexts/theme.provider';
 import { McpProvider } from './contexts/mcp';
+import { RouterError } from './components/router-error';
 import { TooltipProvider } from './components/ui/tooltip';
 import { getActiveProjectId } from './lib/active-project';
 import { routeTree } from './routeTree.gen';
@@ -35,7 +36,18 @@ const router = createRouter({
 	scrollRestoration: true,
 	defaultStructuralSharing: true,
 	defaultPreloadStaleTime: 0,
+	defaultErrorComponent: RouterError,
 });
+
+window.addEventListener('vite:preloadError', () => {
+	if (sessionStorage.getItem('nao:chunk-error-reloaded') === '1') {
+		return;
+	}
+	sessionStorage.setItem('nao:chunk-error-reloaded', '1');
+	window.location.reload();
+});
+
+setTimeout(() => sessionStorage.removeItem('nao:chunk-error-reloaded'), 5000);
 
 /** Query client for state management */
 export const queryClient = new QueryClient({
