@@ -2,13 +2,72 @@ import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { buildChart } from '../src/chart-builder';
+import { buildChart, niceAxisMax, shouldReserveDataLabelHeadroom } from '../src/chart-builder';
 
 function renderChart(element: React.ReactElement) {
 	return renderToString(React.cloneElement(element, { width: 600, height: 400 }));
 }
 
 describe('buildChart data labels', () => {
+	it('rounds axis max using nice tick steps', () => {
+		expect(niceAxisMax(622)).toBe(800);
+		expect(niceAxisMax(780)).toBe(800);
+		expect(niceAxisMax(460)).toBe(600);
+	});
+
+	it('does not reserve headroom when labels fit below the nice axis top', () => {
+		expect(
+			shouldReserveDataLabelHeadroom({
+				data: [{ m: 'a', v: 460 }],
+				chartType: 'bar',
+				xAxisKey: 'm',
+				series: [{ data_key: 'v' }],
+				showDataLabels: true,
+			}),
+		).toBe(false);
+	});
+
+	it('reserves headroom when labels are close to the nice axis top', () => {
+		expect(
+			shouldReserveDataLabelHeadroom({
+				data: [{ m: 'a', v: 780 }],
+				chartType: 'bar',
+				xAxisKey: 'm',
+				series: [{ data_key: 'v' }],
+				showDataLabels: true,
+			}),
+		).toBe(true);
+	});
+
+	it('does not reserve headroom when data labels are disabled', () => {
+		expect(
+			shouldReserveDataLabelHeadroom({
+				data: [{ m: 'a', v: 780 }],
+				chartType: 'bar',
+				xAxisKey: 'm',
+				series: [{ data_key: 'v' }],
+			}),
+		).toBe(false);
+	});
+
+	it('renders x and y axes for cartesian charts', () => {
+		const html = renderChart(
+			buildChart({
+				data: [
+					{ month: 'Jan', sales: 460 },
+					{ month: 'Feb', sales: 520 },
+				],
+				chartType: 'bar',
+				xAxisKey: 'month',
+				xAxisType: 'category',
+				series: [{ data_key: 'sales' }],
+			}),
+		);
+
+		expect(html).toContain('recharts-yAxis');
+		expect(html).toContain('recharts-xAxis');
+	});
+
 	it('renders point labels when enabled for bar charts', () => {
 		const html = renderChart(
 			buildChart({
@@ -99,10 +158,7 @@ describe('buildChart data labels', () => {
 		values[11] = 9;
 		values[19] = 4;
 		values[28] = 3;
-		const data = values.map((value, index) => ({
-			day: `Day ${index + 1}`,
-			value,
-		}));
+		const data = values.map((value, index) => ({ day: `Day ${index + 1}`, value }));
 		const html = renderChart(
 			buildChart({
 				data,
