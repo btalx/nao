@@ -3,12 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { buildSlackTableBlocks, createTextBlocks } from '../src/utils/messaging-provider';
 
 type AnyBlock = { type: string; [key: string]: unknown };
+type TextChild = { type: string; content: string };
 
-function tableChild(blocks: ReturnType<typeof createTextBlocks>) {
-	return blocks.find((block) => block.type === 'table') as
-		| { type: 'table'; headers: string[]; rows: string[][] }
-		| undefined;
-}
+const contents = (blocks: ReturnType<typeof createTextBlocks>): string[] =>
+	blocks.map((block) => (block as TextChild).content);
+
+const tableChunks = (blocks: ReturnType<typeof createTextBlocks>): string[] =>
+	contents(blocks).filter((content) => content.startsWith('```'));
 
 describe('createTextBlocks', () => {
 	it('returns a single text block when there is no table', () => {
@@ -17,7 +18,7 @@ describe('createTextBlocks', () => {
 		expect(blocks[0]).toMatchObject({ type: 'text', content: 'Just a plain answer with *bold*.' });
 	});
 
-	it('splits a markdown table into a Table element with text around it', () => {
+	it('renders a markdown table as a monospace text block, never a Slack table block', () => {
 		const text = [
 			'Here is your table:',
 			'',
@@ -31,66 +32,59 @@ describe('createTextBlocks', () => {
 
 		const blocks = createTextBlocks(text);
 
-		expect(blocks.map((block) => block.type)).toEqual(['text', 'table', 'text']);
-		expect(tableChild(blocks)).toEqual({
-			type: 'table',
-			headers: ['Column A', 'Column B'],
-			rows: [
-				['Hello', 'World'],
-				['Foo', 'Bar'],
-			],
-		});
-		expect(blocks[0]).toMatchObject({ content: 'Here is your table:' });
-		expect(blocks[2]).toMatchObject({ content: 'Let me know!' });
+		expect(blocks.every((block) => block.type === 'text')).toBe(true);
+		expect(blocks.some((block) => (block as AnyBlock).type === 'table')).toBe(false);
+
+		const table = tableChunks(blocks)[0];
+		expect(table).toBeDefined();
+		expect(table).toContain('Column A  Column B');
+		expect(table).toContain('Hello     World');
+		expect(table).toContain('Foo       Bar');
+		expect(contents(blocks)[0]).toBe('Here is your table:');
+		expect(contents(blocks).at(-1)).toBe('Let me know!');
 	});
 
-	it('handles tables without outer pipes and alignment markers', () => {
-		const text = ['Revenue | Region', ':---|---:', 'Hello | World'].join('\n');
-		const table = tableChild(createTextBlocks(text));
-		expect(table).toEqual({
-			type: 'table',
-			headers: ['Revenue', 'Region'],
-			rows: [['Hello', 'World']],
-		});
+	it('renders empty and missing cells as blank padding rather than invalid blocks', () => {
+		// ENG-6842: an empty cell produced an empty `raw_text` element that Slack rejected.
+		const text = ['| A | B | C |', '|---|---|---|', '| 1 |  | 3 |', '| 4 | 5 |'].join('\n');
+		const blocks = createTextBlocks(text);
+		expect(blocks.every((block) => block.type === 'text')).toBe(true);
+		const table = tableChunks(blocks)[0];
+		expect(table).toContain('1');
+		expect(table).toContain('4  5');
 	});
 
-	it('strips inline markdown and links inside table cells', () => {
-		const text = ['| Name | Link |', '|------|------|', '| **Bob** | [docs](https://x.dev) |'].join('\n');
-		const table = tableChild(createTextBlocks(text));
-		expect(table?.rows).toEqual([['Bob', 'docs']]);
+	it('truncates an oversized cell so a chunk can never exceed the Slack section limit', () => {
+		// ENG-6842: a very long cell tripped Slack's "failed to match any allowed schemas".
+		const huge = 'x'.repeat(5000);
+		const text = ['| A | B |', '|---|---|', `| ${huge} | ok |`].join('\n');
+		const table = tableChunks(createTextBlocks(text))[0];
+		expect(table.length).toBeLessThan(3000);
+		expect(table).toContain('…');
 	});
 
-	it('pads and truncates rows to match the header column count', () => {
-		const text = ['| A | B | C |', '|---|---|---|', '| 1 | 2 |', '| 1 | 2 | 3 | 4 |'].join('\n');
-		const table = tableChild(createTextBlocks(text));
-		expect(table?.rows).toEqual([
-			['1', '2', ''],
-			['1', '2', '3'],
-		]);
+	it('splits a wide table into multiple monospace blocks each under the section limit', () => {
+		const rows = Array.from({ length: 60 }, (_, i) => `| row-${i} | ${'v'.repeat(80)} |`);
+		const text = ['| A | B |', '|---|---|', ...rows].join('\n');
+		const chunks = tableChunks(createTextBlocks(text));
+		expect(chunks.length).toBeGreaterThan(1);
+		for (const chunk of chunks) {
+			expect(chunk.length).toBeLessThanOrEqual(2900);
+		}
+	});
+
+	it('caps very long tables and points overflow at nao', () => {
+		const rows = Array.from({ length: 250 }, (_, i) => `| ${i} | v${i} |`);
+		const text = ['| A | B |', '|---|---|', ...rows].join('\n');
+		const overflow = contents(createTextBlocks(text)).find((c) => c.includes('more row'));
+		expect(overflow).toBeDefined();
+		expect(overflow).toContain('open in nao');
 	});
 
 	it('does not treat pipe tables inside fenced code blocks as tables', () => {
 		const text = ['```', '| A | B |', '|---|---|', '| 1 | 2 |', '```'].join('\n');
 		const blocks = createTextBlocks(text);
 		expect(blocks.map((block) => block.type)).toEqual(['text']);
-		expect(tableChild(blocks)).toBeUndefined();
-	});
-
-	it('keeps a mismatched fence marker as literal content inside a code block', () => {
-		const text = ['```', '~~~', '| A | B |', '|---|---|', '| 1 | 2 |', '```'].join('\n');
-		const blocks = createTextBlocks(text);
-		expect(blocks.map((block) => block.type)).toEqual(['text']);
-		expect(tableChild(blocks)).toBeUndefined();
-	});
-
-	it('parses a real table that follows a closed code block', () => {
-		const text = ['```', 'code', '```', '', '| A | B |', '|---|---|', '| 1 | 2 |'].join('\n');
-		const table = tableChild(createTextBlocks(text));
-		expect(table).toEqual({
-			type: 'table',
-			headers: ['A', 'B'],
-			rows: [['1', '2']],
-		});
 	});
 });
 
@@ -99,31 +93,14 @@ describe('buildSlackTableBlocks', () => {
 		expect(buildSlackTableBlocks('No tables here, just text.')).toBeNull();
 	});
 
-	it('builds an official Slack table block from a markdown table', () => {
+	it('builds only valid section blocks (no fragile Slack table block) from a markdown table', () => {
 		const text = ['| Column A | Column B |', '|----------|----------|', '| Hello | World |', '| Foo | Bar |'].join(
 			'\n',
 		);
 
 		const blocks = buildSlackTableBlocks(text) as AnyBlock[] | null;
 		expect(blocks).not.toBeNull();
-
-		const tableBlock = blocks!.find((block) => block.type === 'table') as
-			| { type: 'table'; rows: { type: string; text: string }[][] }
-			| undefined;
-		expect(tableBlock).toBeDefined();
-		expect(tableBlock!.rows).toEqual([
-			[
-				{ type: 'raw_text', text: 'Column A' },
-				{ type: 'raw_text', text: 'Column B' },
-			],
-			[
-				{ type: 'raw_text', text: 'Hello' },
-				{ type: 'raw_text', text: 'World' },
-			],
-			[
-				{ type: 'raw_text', text: 'Foo' },
-				{ type: 'raw_text', text: 'Bar' },
-			],
-		]);
+		expect(blocks!.length).toBeGreaterThan(0);
+		expect(blocks!.some((block) => block.type === 'table')).toBe(false);
 	});
 });

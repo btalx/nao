@@ -1,7 +1,7 @@
 import { cardToBlockKit } from '@chat-adapter/slack';
 import { CITATION_TAG_REGEX, pluralize, TOOL_LABELS } from '@nao/shared';
 import type { CardChild, CardElement, ModalElement } from 'chat';
-import { Actions, Button, Card, CardText, Image, LinkButton, Table } from 'chat';
+import { Actions, Button, Card, CardText, Image, LinkButton } from 'chat';
 
 import { ToolCallEntry } from '../types/messaging-provider';
 import { BudgetExceededError } from './error';
@@ -106,11 +106,60 @@ export const createTextBlock = (text: string): CardChild => {
 	return CardText(rendered || text);
 };
 
+// Slack rejects section text over 3000 chars; leave headroom for the ``` fences.
+const SLACK_SECTION_TEXT_LIMIT = 2900;
+const FENCE_OVERHEAD = '```\n'.length + '\n```'.length;
+// A single cell longer than this is truncated so it can never blow the section limit.
+const MAX_CELL_CHARS = 200;
+// Keep answers bounded; overflow points the user at the full result in nao.
+const MAX_TABLE_ROWS = 100;
+
+const clampCell = (value: string): string => {
+	const cell = value ?? '';
+	return cell.length > MAX_CELL_CHARS ? `${cell.slice(0, MAX_CELL_CHARS - 1)}…` : cell;
+};
+
+// Render a parsed markdown table as fixed-width monospace text, split into chunks
+// that each stay under Slack's section limit. The header row repeats per chunk.
+const buildMonospaceTable = (
+	headers: string[],
+	allRows: string[][],
+): { chunks: string[]; hiddenRows: number } => {
+	const rows = allRows.slice(0, MAX_TABLE_ROWS).map((row) => row.map(clampCell));
+	const head = headers.map(clampCell);
+	const widths = head.map((cell, col) => Math.max(cell.length, ...rows.map((row) => (row[col] ?? '').length)));
+	const formatRow = (cells: string[]): string =>
+		widths.map((width, col) => (cells[col] ?? '').padEnd(width)).join('  ');
+	const heading = `${formatRow(head)}\n${widths.map((width) => '-'.repeat(width)).join('  ')}`;
+
+	const chunks: string[] = [];
+	let current = heading;
+	for (const row of rows) {
+		const line = formatRow(row);
+		if (current.length + 1 + line.length + FENCE_OVERHEAD > SLACK_SECTION_TEXT_LIMIT) {
+			chunks.push(current);
+			current = `${heading}\n${line}`;
+		} else {
+			current = `${current}\n${line}`;
+		}
+	}
+	chunks.push(current);
+	return { chunks, hiddenRows: allRows.length - rows.length };
+};
+
+const fenceMonospace = (chunk: string): string => `\`\`\`\n${chunk}\n\`\`\``;
+
 export const createTextBlocks = (text: string): CardChild[] => {
 	const blocks: CardChild[] = [];
 	for (const segment of splitMarkdownSegments(text)) {
 		if (segment.type === 'table') {
-			blocks.push(Table({ headers: segment.headers, rows: segment.rows }));
+			const { chunks, hiddenRows } = buildMonospaceTable(segment.headers, segment.rows);
+			for (const chunk of chunks) {
+				blocks.push(CardText(fenceMonospace(chunk)));
+			}
+			if (hiddenRows > 0) {
+				blocks.push(CardText(`_…${hiddenRows} more ${pluralize('row', hiddenRows)} (open in nao)_`, { style: 'muted' }));
+			}
 			continue;
 		}
 		const rendered = mdToMrkdwn(segment.text).trim();
@@ -121,17 +170,29 @@ export const createTextBlocks = (text: string): CardChild[] => {
 	return blocks;
 };
 
+// Inline monospace version for the plain-text `text` field / notification fallback.
+const renderMarkdownTablesInline = (text: string): string =>
+	splitMarkdownSegments(text)
+		.map((segment) =>
+			segment.type === 'table'
+				? buildMonospaceTable(segment.headers, segment.rows)
+						.chunks.map(fenceMonospace)
+						.join('\n\n')
+				: segment.text,
+		)
+		.join('\n');
+
 export function buildSlackTableBlocks(text: string): ReturnType<typeof cardToBlockKit> | null {
 	const sanitized = text.replace(CITATION_TAG_REGEX, '');
-	const children = createTextBlocks(sanitized);
-	if (!children.some((child) => child.type === 'table')) {
+	const hasTable = splitMarkdownSegments(sanitized).some((segment) => segment.type === 'table');
+	if (!hasTable) {
 		return null;
 	}
-	return cardToBlockKit(Card({ children }));
+	return cardToBlockKit(Card({ children: createTextBlocks(sanitized) }));
 }
 
 export function formatSlackMessageText(text: string): string {
-	const sanitized = text.replace(CITATION_TAG_REGEX, '');
+	const sanitized = renderMarkdownTablesInline(text.replace(CITATION_TAG_REGEX, ''));
 	return mdToMrkdwn(sanitized) || sanitized;
 }
 

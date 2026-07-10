@@ -4,7 +4,7 @@ import { createSlackAdapter } from '@chat-adapter/slack';
 import { createMemoryState } from '@chat-adapter/state-memory';
 import { CITATION_TAG_REGEX } from '@nao/shared';
 import type { LlmSelectedModel } from '@nao/shared/types';
-import { type ChatPostMessageArguments, WebClient } from '@slack/web-api';
+import { type ChatPostMessageArguments, type ChatPostMessageResponse, WebClient } from '@slack/web-api';
 import { InferUIMessageChunk, readUIMessageStream } from 'ai';
 import { Card, Chat, deriveChannelId, Message, SentMessage, Thread, ThreadImpl } from 'chat';
 
@@ -162,7 +162,20 @@ class ProjectSlackBot {
 		if (blocks) {
 			(args as { blocks?: unknown }).blocks = blocks;
 		}
-		const result = await this._slackClient.chat.postMessage(args);
+
+		let result: ChatPostMessageResponse;
+		try {
+			result = await this._slackClient.chat.postMessage(args);
+		} catch (error) {
+			if (!blocks) {
+				throw error;
+			}
+			// Block Kit payload was rejected (e.g. an invalid/oversized block); never drop the
+			// answer. Retry with just the text field, which already carries the full content.
+			logger.warn(`Slack rejected block payload, retrying as text-only: ${String(error)}`, { channelId });
+			delete (args as { blocks?: unknown }).blocks;
+			result = await this._slackClient.chat.postMessage(args);
+		}
 
 		if (!result.ok) {
 			throw new Error(result.error ?? 'Failed to post Slack message.');
