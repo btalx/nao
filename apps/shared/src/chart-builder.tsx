@@ -189,9 +189,6 @@ function getMaxSeriesValue(data: Record<string, unknown>[], series: displayChart
 function getMaxStackTotal(data: Record<string, unknown>[], series: displayChart.SeriesConfig[]): number | null {
 	let max: number | null = null;
 	for (const row of data) {
-function getMaxStackTotal(data: Record<string, unknown>[], series: displayChart.SeriesConfig[]): number | null {
-	let max: number | null = null;
-	for (const row of data) {
 		let positive = 0;
 		for (const item of series) {
 			if (item.is_total) continue;
@@ -206,6 +203,8 @@ function getMaxStackTotal(data: Record<string, unknown>[], series: displayChart.
 	}
 	return max;
 }
+
+export function niceAxisMax(dataMax: number, tickCount = 5): number {
 	if (dataMax <= 0) {
 		return 0;
 	}
