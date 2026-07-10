@@ -189,15 +189,23 @@ function getMaxSeriesValue(data: Record<string, unknown>[], series: displayChart
 function getMaxStackTotal(data: Record<string, unknown>[], series: displayChart.SeriesConfig[]): number | null {
 	let max: number | null = null;
 	for (const row of data) {
-		const total = sumStackValue(row, series);
-		if (total != null && (max == null || total > max)) {
-			max = total;
+function getMaxStackTotal(data: Record<string, unknown>[], series: displayChart.SeriesConfig[]): number | null {
+	let max: number | null = null;
+	for (const row of data) {
+		let positive = 0;
+		for (const item of series) {
+			if (item.is_total) continue;
+			const value = toFiniteNumber(row[item.data_key]);
+			if (value != null && value > 0) {
+				positive += value;
+			}
+		}
+		if (positive > 0 && (max == null || positive > max)) {
+			max = positive;
 		}
 	}
 	return max;
 }
-
-export function niceAxisMax(dataMax: number, tickCount = 5): number {
 	if (dataMax <= 0) {
 		return 0;
 	}
