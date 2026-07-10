@@ -109,9 +109,7 @@ export const createTextBlock = (text: string): CardChild => {
 // Slack rejects section text over 3000 chars; leave headroom for the ``` fences.
 const SLACK_SECTION_TEXT_LIMIT = 2900;
 const FENCE_OVERHEAD = '```\n'.length + '\n```'.length;
-// A single cell longer than this is truncated so it can never blow the section limit.
 const MAX_CELL_CHARS = 200;
-// Keep answers bounded; overflow points the user at the full result in nao.
 const MAX_TABLE_ROWS = 100;
 
 const clampCell = (value: string): string => {
@@ -119,12 +117,7 @@ const clampCell = (value: string): string => {
 	return cell.length > MAX_CELL_CHARS ? `${cell.slice(0, MAX_CELL_CHARS - 1)}…` : cell;
 };
 
-// Render a parsed markdown table as fixed-width monospace text, split into chunks
-// that each stay under Slack's section limit. The header row repeats per chunk.
-const buildMonospaceTable = (
-	headers: string[],
-	allRows: string[][],
-): { chunks: string[]; hiddenRows: number } => {
+const buildMonospaceTable = (headers: string[], allRows: string[][]): { chunks: string[]; hiddenRows: number } => {
 	const rows = allRows.slice(0, MAX_TABLE_ROWS).map((row) => row.map(clampCell));
 	const head = headers.map(clampCell);
 	const widths = head.map((cell, col) => Math.max(cell.length, ...rows.map((row) => (row[col] ?? '').length)));
@@ -158,7 +151,9 @@ export const createTextBlocks = (text: string): CardChild[] => {
 				blocks.push(CardText(fenceMonospace(chunk)));
 			}
 			if (hiddenRows > 0) {
-				blocks.push(CardText(`_…${hiddenRows} more ${pluralize('row', hiddenRows)} (open in nao)_`, { style: 'muted' }));
+				blocks.push(
+					CardText(`_…${hiddenRows} more ${pluralize('row', hiddenRows)} (open in nao)_`, { style: 'muted' }),
+				);
 			}
 			continue;
 		}
@@ -170,14 +165,11 @@ export const createTextBlocks = (text: string): CardChild[] => {
 	return blocks;
 };
 
-// Inline monospace version for the plain-text `text` field / notification fallback.
 const renderMarkdownTablesInline = (text: string): string =>
 	splitMarkdownSegments(text)
 		.map((segment) =>
 			segment.type === 'table'
-				? buildMonospaceTable(segment.headers, segment.rows)
-						.chunks.map(fenceMonospace)
-						.join('\n\n')
+				? buildMonospaceTable(segment.headers, segment.rows).chunks.map(fenceMonospace).join('\n\n')
 				: segment.text,
 		)
 		.join('\n');
