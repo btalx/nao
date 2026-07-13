@@ -110,7 +110,13 @@ export const createTextBlocks = (text: string): CardChild[] => {
 	const blocks: CardChild[] = [];
 	for (const segment of splitMarkdownSegments(text)) {
 		if (segment.type === 'table') {
-			blocks.push(Table({ headers: segment.headers, rows: segment.rows }));
+			const { headers, rows, hiddenRows } = fitTableToSlackLimits(segment.headers, segment.rows);
+			blocks.push(Table({ headers, rows }));
+			if (hiddenRows > 0) {
+				blocks.push(
+					CardText(`_…${hiddenRows} more ${pluralize('row', hiddenRows)}, open in nao_`, { style: 'muted' }),
+				);
+			}
 			continue;
 		}
 		const rendered = mdToMrkdwn(segment.text).trim();
@@ -120,6 +126,39 @@ export const createTextBlocks = (text: string): CardChild[] => {
 	}
 	return blocks;
 };
+
+// Slack's native table block rejects the whole message when it exceeds 100 rows, 20 columns, or
+// 10,000 characters summed across every cell. We keep the rich table block but trim it to fit so a
+// large result degrades gracefully instead of dropping the answer entirely.
+const SLACK_TABLE_MAX_ROWS = 100;
+const SLACK_TABLE_MAX_CELL_CHARS = 300;
+const SLACK_TABLE_MAX_TOTAL_CHARS = 9000;
+
+type FittedTable = { headers: string[]; rows: string[][]; hiddenRows: number };
+
+const clampCell = (cell: string): string =>
+	cell.length > SLACK_TABLE_MAX_CELL_CHARS ? `${cell.slice(0, SLACK_TABLE_MAX_CELL_CHARS - 1)}…` : cell;
+
+const rowCharCount = (row: string[]): number => row.reduce((total, cell) => total + Math.max(cell.length, 1), 0);
+
+function fitTableToSlackLimits(rawHeaders: string[], rawRows: string[][]): FittedTable {
+	const headers = rawHeaders.map(clampCell);
+	const rows: string[][] = [];
+	let totalChars = rowCharCount(headers);
+	for (const rawRow of rawRows) {
+		if (rows.length >= SLACK_TABLE_MAX_ROWS) {
+			break;
+		}
+		const row = rawRow.map(clampCell);
+		const cost = rowCharCount(row);
+		if (totalChars + cost > SLACK_TABLE_MAX_TOTAL_CHARS) {
+			break;
+		}
+		totalChars += cost;
+		rows.push(row);
+	}
+	return { headers, rows, hiddenRows: rawRows.length - rows.length };
+}
 
 export function buildSlackTableBlocks(text: string): ReturnType<typeof cardToBlockKit> | null {
 	const sanitized = text.replace(CITATION_TAG_REGEX, '');

@@ -92,6 +92,41 @@ describe('createTextBlocks', () => {
 			rows: [['1', '2']],
 		});
 	});
+
+	it('clamps an oversized cell so it cannot blow Slack table limits', () => {
+		const long = 'x'.repeat(500);
+		const text = ['| Name | Value |', '|------|-------|', `| row | ${long} |`].join('\n');
+		const cell = tableChild(createTextBlocks(text))?.rows[0][1] ?? '';
+		expect(cell.length).toBe(300);
+		expect(cell.endsWith('…')).toBe(true);
+	});
+
+	it('caps a table at 100 rows and notes the hidden ones', () => {
+		const rows = Array.from({ length: 150 }, (_, i) => `| ${i} |`);
+		const blocks = createTextBlocks(['| N |', '|---|', ...rows].join('\n'));
+		expect(tableChild(blocks)?.rows).toHaveLength(100);
+		const note = blocks.find((block) => block.type === 'text' && String(block.content).includes('more row'));
+		expect(String(note?.content)).toContain('50 more rows');
+	});
+
+	it('drops rows beyond the total-character budget and notes how many were hidden', () => {
+		const cell = 'y'.repeat(200);
+		const rows = Array.from({ length: 60 }, () => `| ${cell} | ${cell} |`);
+		const blocks = createTextBlocks(['| A | B |', '|---|---|', ...rows].join('\n'));
+		const table = tableChild(blocks);
+		expect(table).toBeDefined();
+		expect(table!.rows.length).toBeLessThan(60);
+
+		const budget = table!.rows.reduce(
+			(sum, row) => sum + row.reduce((rowSum, value) => rowSum + Math.max(value.length, 1), 0),
+			table!.headers.reduce((sum, value) => sum + Math.max(value.length, 1), 0),
+		);
+		expect(budget).toBeLessThanOrEqual(9000);
+
+		const note = blocks.find((block) => block.type === 'text' && String(block.content).includes('more row'));
+		const hidden = Number(/…(\d+) more/.exec(String(note?.content))?.[1]);
+		expect(hidden).toBe(60 - table!.rows.length);
+	});
 });
 
 describe('buildSlackTableBlocks', () => {
@@ -125,5 +160,22 @@ describe('buildSlackTableBlocks', () => {
 				{ type: 'raw_text', text: 'Bar' },
 			],
 		]);
+	});
+
+	it("keeps the rendered table block within Slack's 10,000-character budget", () => {
+		const bigRows = Array.from({ length: 200 }, (_, i) => `| item ${i} | ${'x'.repeat(120)} |`);
+		const text = ['| Name | Description |', '|------|-------------|', ...bigRows].join('\n');
+
+		const blocks = buildSlackTableBlocks(text) as AnyBlock[] | null;
+		const tableBlock = blocks?.find((block) => block.type === 'table') as
+			| { rows: { type: string; text: string }[][] }
+			| undefined;
+		expect(tableBlock).toBeDefined();
+
+		const totalChars = tableBlock!.rows.reduce(
+			(sum, row) => sum + row.reduce((rowSum, cell) => rowSum + cell.text.length, 0),
+			0,
+		);
+		expect(totalChars).toBeLessThanOrEqual(10_000);
 	});
 });
