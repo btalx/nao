@@ -37,6 +37,7 @@ import {
 	createFeedbackModal,
 	createImageBlock,
 	createLiveToolCall,
+	createSlackTableRenderState,
 	createStopButtonActions,
 	createSummaryToolCalls,
 	createTextBlock,
@@ -46,6 +47,7 @@ import {
 	formatMessagingError,
 	formatSlackMessageText,
 	isRecoverableSlackPayloadError,
+	type SlackTableRenderState,
 	type TruncationNotice,
 } from '../utils/messaging-provider';
 import { shouldReplyToSlackThreadMessage } from '../utils/slack-reply-policy';
@@ -88,6 +90,8 @@ type SlackStreamState = {
 	lastDeliveredChildren: ConversationContext['blocks'];
 	latestSourceText: string;
 	payloadRejected: boolean;
+	tableStateAtRunEnd: SlackTableRenderState | null;
+	tableStateAtRunStart: SlackTableRenderState;
 };
 type SlackCompletionCard = {
 	channelId: string;
@@ -656,6 +660,8 @@ class ProjectSlackBot {
 			lastDeliveredChildren: [],
 			latestSourceText: '',
 			payloadRejected: false,
+			tableStateAtRunEnd: null,
+			tableStateAtRunStart: createSlackTableRenderState(),
 		};
 		this._slackStreamStates.set(ctx, streamState);
 		return streamState;
@@ -1074,6 +1080,10 @@ class ProjectSlackBot {
 				sourceEnd: streamState.latestSourceText.length,
 			});
 		}
+		if (streamState.tableStateAtRunEnd) {
+			streamState.tableStateAtRunStart = streamState.tableStateAtRunEnd;
+		}
+		streamState.tableStateAtRunEnd = null;
 		streamState.textRunStart = streamState.latestSourceText.length;
 		ctx.textBlockIndex = -1;
 		ctx.textBlockCount = 0;
@@ -1082,18 +1092,42 @@ class ProjectSlackBot {
 	private async _sendFinalText(ctx: ConversationContext, activeStream: SlackActiveStream): Promise<void> {
 		const streamState = this._getSlackStreamState(ctx);
 		const chatUrl = new URL(ctx.chatId, this._redirectUrl).toString();
-		if (ctx.textBlockIndex !== -1) {
-			this._updateTextBlock(streamState.latestSourceText, ctx, {
-				truncation: { kind: 'link', url: chatUrl },
+		const tableState = createSlackTableRenderState();
+		const replacements: {
+			blockIndex: number;
+			blockCount: number;
+			blocks: ReturnType<typeof createTextBlocks>;
+			updatesOpenRunCount: boolean;
+		}[] = [];
+		for (const run of streamState.closedTextRuns) {
+			replacements.push({
+				blockIndex: run.blockIndex,
+				blockCount: run.blockCount,
+				blocks: createTextBlocks(streamState.latestSourceText.slice(run.sourceStart, run.sourceEnd), {
+					truncation: { kind: 'link', url: chatUrl },
+					tableState,
+				}),
+				updatesOpenRunCount: false,
 			});
 		}
-		for (let index = streamState.closedTextRuns.length - 1; index >= 0; index -= 1) {
-			const run = streamState.closedTextRuns[index];
-			const blocks = createTextBlocks(streamState.latestSourceText.slice(run.sourceStart, run.sourceEnd), {
-				truncation: { kind: 'link', url: chatUrl },
+		if (ctx.textBlockIndex !== -1) {
+			replacements.push({
+				blockIndex: ctx.textBlockIndex,
+				blockCount: ctx.textBlockCount,
+				blocks: createTextBlocks(streamState.latestSourceText.slice(streamState.textRunStart), {
+					truncation: { kind: 'link', url: chatUrl },
+					tableState,
+				}),
+				updatesOpenRunCount: true,
 			});
-			if (blocks.length > 0) {
-				ctx.blocks.splice(run.blockIndex, run.blockCount, ...blocks);
+		}
+		replacements.sort((left, right) => right.blockIndex - left.blockIndex);
+		for (const replacement of replacements) {
+			if (replacement.blocks.length > 0) {
+				ctx.blocks.splice(replacement.blockIndex, replacement.blockCount, ...replacement.blocks);
+				if (replacement.updatesOpenRunCount) {
+					ctx.textBlockCount = replacement.blocks.length;
+				}
 			}
 		}
 		const finalBlocks =
@@ -1111,10 +1145,12 @@ class ProjectSlackBot {
 		const streamState = this._getSlackStreamState(ctx);
 		streamState.latestSourceText = text.replace(CITATION_TAG_REGEX, '');
 		const visibleText = streamState.latestSourceText.slice(streamState.textRunStart);
-		const blocks = createTextBlocks(visibleText, options);
+		const tableState = { ...streamState.tableStateAtRunStart };
+		const blocks = createTextBlocks(visibleText, { ...options, tableState });
 		if (blocks.length === 0) {
 			return;
 		}
+		streamState.tableStateAtRunEnd = tableState;
 		if (ctx.textBlockIndex === -1) {
 			ctx.textBlockIndex = ctx.blocks.length;
 			ctx.blocks.push(...blocks);

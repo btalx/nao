@@ -122,30 +122,41 @@ export const SLACK_SECTION_TEXT_MAX_CHARS = 2900;
 
 export type TruncationNotice = { kind: 'hidden' } | { kind: 'note' } | { kind: 'link'; url: string };
 
+export type SlackTableRenderState = {
+	remainingTableChars: number;
+	hasNativeTable: boolean;
+	tableNumber: number;
+};
+
+export const createSlackTableRenderState = (): SlackTableRenderState => ({
+	remainingTableChars: SLACK_TABLE_MAX_TOTAL_CHARS,
+	hasNativeTable: false,
+	tableNumber: 0,
+});
+
 type CreateTextBlocksOptions = {
 	truncation?: TruncationNotice;
+	tableState?: SlackTableRenderState;
 };
 
 export const createTextBlocks = (text: string, options: CreateTextBlocksOptions = {}): CardChild[] => {
 	const blocks: CardChild[] = [];
-	let remainingTableChars = SLACK_TABLE_MAX_TOTAL_CHARS;
-	let hasNativeTable = false;
-	let tableNumber = 0;
+	const tableState = options.tableState ?? createSlackTableRenderState();
 	const truncation = options.truncation ?? { kind: 'note' };
 	for (const segment of splitMarkdownSegments(text)) {
 		if (segment.type === 'table') {
-			tableNumber++;
-			if (hasNativeTable) {
-				const notice = createHiddenTableNotice(truncation, tableNumber);
+			tableState.tableNumber++;
+			if (tableState.hasNativeTable) {
+				const notice = createHiddenTableNotice(truncation, tableState.tableNumber);
 				if (notice) {
 					blocks.push(notice);
 				}
 				continue;
 			}
 
-			const fittedTable = fitTableToSlackLimits(segment.headers, segment.rows, remainingTableChars);
-			remainingTableChars -= fittedTable.totalChars;
-			hasNativeTable = true;
+			const fittedTable = fitTableToSlackLimits(segment.headers, segment.rows, tableState.remainingTableChars);
+			tableState.remainingTableChars -= fittedTable.totalChars;
+			tableState.hasNativeTable = true;
 
 			if (fittedTable.headers.length > 0) {
 				blocks.push(Table({ headers: fittedTable.headers, rows: fittedTable.rows }));

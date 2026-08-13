@@ -6,6 +6,7 @@ import {
 	chunkSlackText,
 	countHiddenTableNotices,
 	createCompletionCard,
+	createSlackTableRenderState,
 	createStopButtonCard,
 	createTextBlocks,
 	isRecoverableSlackPayloadError,
@@ -361,6 +362,57 @@ describe('createTextBlocks', () => {
 			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 3 ]*',
 			style: 'muted',
 		});
+	});
+
+	it('shares native table selection and hidden table counting across calls', () => {
+		const tableState = createSlackTableRenderState();
+		const firstBlocks = createTextBlocks('| First |\n|---|\n| value |', { tableState });
+		const secondBlocks = createTextBlocks('| Second |\n|---|\n| value |', { tableState });
+
+		expect(firstBlocks.map((block) => block.type)).toEqual(['table']);
+		expect(secondBlocks.map((block) => block.type)).toEqual(['text']);
+		expect(secondBlocks[0]).toMatchObject({
+			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 2 ]*',
+			style: 'muted',
+		});
+		expect(countHiddenTableNotices([...firstBlocks, ...secondBlocks])).toBe(1);
+	});
+
+	it('continues hidden table numbering across calls', () => {
+		const tableState = createSlackTableRenderState();
+		createTextBlocks('| First |\n|---|\n| value |', { tableState });
+		const secondBlocks = createTextBlocks('| Second |\n|---|\n| value |', { tableState });
+		const thirdBlocks = createTextBlocks('| Third |\n|---|\n| value |', { tableState });
+
+		expect(secondBlocks[0]).toMatchObject({
+			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 2 ]*',
+		});
+		expect(thirdBlocks[0]).toMatchObject({
+			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 3 ]*',
+		});
+	});
+
+	it('shares the table character budget across calls', () => {
+		const tableState = createSlackTableRenderState();
+		const cell = 'x'.repeat(80);
+		const rows = Array.from({ length: 50 }, () => `| ${cell} | ${cell} |`);
+		const firstBlocks = createTextBlocks(['| A | B |', '|---|---|', ...rows].join('\n'), { tableState });
+		const secondBlocks = createTextBlocks('| Second |\n|---|\n| value |', { tableState });
+
+		expect(tableState.remainingTableChars).toBeLessThan(1000);
+		expect(firstBlocks.filter((block) => block.type === 'table')).toHaveLength(1);
+		expect(secondBlocks.filter((block) => block.type === 'table')).toHaveLength(0);
+		expect(secondBlocks[0]).toMatchObject({
+			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 2 ]*',
+		});
+	});
+
+	it('uses independent table state when none is provided', () => {
+		const firstBlocks = createTextBlocks('| First |\n|---|\n| value |');
+		const secondBlocks = createTextBlocks('| Second |\n|---|\n| value |');
+
+		expect(firstBlocks.filter((block) => block.type === 'table')).toHaveLength(1);
+		expect(secondBlocks.filter((block) => block.type === 'table')).toHaveLength(1);
 	});
 });
 
