@@ -77,6 +77,12 @@ type SlackPostMessageResult = {
 	threadId: string;
 };
 type SlackStreamState = {
+	closedTextRuns: {
+		blockIndex: number;
+		blockCount: number;
+		sourceStart: number;
+		sourceEnd: number;
+	}[];
 	messageTs: string | null;
 	textRunStart: number;
 	lastDeliveredChildren: ConversationContext['blocks'];
@@ -471,7 +477,8 @@ class ProjectSlackBot {
 		};
 
 		await this._validateUserAccess(ctx);
-		this._activeStreamsByThread.set(ctx.thread.id, { agent: null, stopRequested: false });
+		const activeStream: SlackActiveStream = { agent: null, stopRequested: false };
+		this._activeStreamsByThread.set(ctx.thread.id, activeStream);
 
 		try {
 			this._getSlackStreamState(ctx).messageTs = await this._postSlackCard(ctx, [
@@ -485,7 +492,7 @@ class ProjectSlackBot {
 				throw new Error('Chat not found after saving message');
 			}
 
-			await this._handleStreamAgent(chat, ctx);
+			await this._handleStreamAgent(chat, ctx, activeStream);
 		} catch (error) {
 			const errorMessage = formatMessagingError(error);
 			ctx.blocks.push(createTextBlock(errorMessage));
@@ -495,7 +502,9 @@ class ProjectSlackBot {
 				await ctx.thread.post(errorMessage);
 			}
 		} finally {
-			this._activeStreamsByThread.delete(ctx.thread.id);
+			if (this._activeStreamsByThread.get(ctx.thread.id) === activeStream) {
+				this._activeStreamsByThread.delete(ctx.thread.id);
+			}
 		}
 	}
 
@@ -641,6 +650,7 @@ class ProjectSlackBot {
 			return existingState;
 		}
 		const streamState: SlackStreamState = {
+			closedTextRuns: [],
 			messageTs: null,
 			textRunStart: 0,
 			lastDeliveredChildren: [],
@@ -838,16 +848,17 @@ class ProjectSlackBot {
 		}
 	}
 
-	private async _handleStreamAgent(chat: UIChat, ctx: ConversationContext): Promise<void> {
+	private async _handleStreamAgent(
+		chat: UIChat,
+		ctx: ConversationContext,
+		activeStream: SlackActiveStream,
+	): Promise<void> {
 		const { agent, stream } = await this._createAgentStream(chat, ctx);
-		const activeStream = this._activeStreamsByThread.get(ctx.thread.id);
-		if (activeStream) {
-			activeStream.agent = agent;
-			if (activeStream.stopRequested) {
-				agent.stop();
-			}
+		activeStream.agent = agent;
+		if (activeStream.stopRequested) {
+			agent.stop();
 		}
-		await this._readStreamAndUpdateSlackMessage(stream, ctx);
+		await this._readStreamAndUpdateSlackMessage(stream, ctx, activeStream);
 
 		const previousCompletion = this._lastCompletionCard.get(ctx.thread.id);
 		if (previousCompletion) {
@@ -896,6 +907,7 @@ class ProjectSlackBot {
 	private async _readStreamAndUpdateSlackMessage(
 		stream: ReadableStream<InferUIMessageChunk<UIMessage>>,
 		ctx: ConversationContext,
+		activeStream: SlackActiveStream,
 	): Promise<StreamState> {
 		const state: StreamState = {
 			renderedChartIds: new Set(),
@@ -934,7 +946,7 @@ class ProjectSlackBot {
 			}
 		}
 
-		await this._sendFinalText(ctx);
+		await this._sendFinalText(ctx, activeStream);
 		return state;
 	}
 
@@ -984,10 +996,7 @@ class ProjectSlackBot {
 			}
 
 			const imageUrl = new URL(`c/${ctx.chatId}/${chartId}.png`, this._redirectUrl).toString();
-			const streamState = this._getSlackStreamState(ctx);
-			streamState.textRunStart = streamState.latestSourceText.length;
-			ctx.textBlockIndex = -1;
-			ctx.textBlockCount = 0;
+			this._closeCurrentTextRun(ctx);
 			ctx.blocks.push(createImageBlock(imageUrl));
 			await this._editConversationCard(ctx, ctx.blocks);
 		} catch (error) {
@@ -1052,29 +1061,45 @@ class ProjectSlackBot {
 		}
 		state.toolGroup = new Map();
 		state.toolGroupBlockIndex = -1;
+		this._closeCurrentTextRun(ctx);
+	}
+
+	private _closeCurrentTextRun(ctx: ConversationContext): void {
 		const streamState = this._getSlackStreamState(ctx);
+		if (ctx.textBlockIndex !== -1) {
+			streamState.closedTextRuns.push({
+				blockIndex: ctx.textBlockIndex,
+				blockCount: ctx.textBlockCount,
+				sourceStart: streamState.textRunStart,
+				sourceEnd: streamState.latestSourceText.length,
+			});
+		}
 		streamState.textRunStart = streamState.latestSourceText.length;
 		ctx.textBlockIndex = -1;
 		ctx.textBlockCount = 0;
 	}
 
-	private async _sendFinalText(ctx: ConversationContext): Promise<void> {
+	private async _sendFinalText(ctx: ConversationContext, activeStream: SlackActiveStream): Promise<void> {
+		const streamState = this._getSlackStreamState(ctx);
+		const chatUrl = new URL(ctx.chatId, this._redirectUrl).toString();
 		if (ctx.textBlockIndex !== -1) {
-			const chatUrl = new URL(ctx.chatId, this._redirectUrl).toString();
-			this._updateTextBlock(this._getSlackStreamState(ctx).latestSourceText, ctx, {
+			this._updateTextBlock(streamState.latestSourceText, ctx, {
 				truncation: { kind: 'link', url: chatUrl },
 			});
+		}
+		for (let index = streamState.closedTextRuns.length - 1; index >= 0; index -= 1) {
+			const run = streamState.closedTextRuns[index];
+			const blocks = createTextBlocks(streamState.latestSourceText.slice(run.sourceStart, run.sourceEnd), {
+				truncation: { kind: 'link', url: chatUrl },
+			});
+			if (blocks.length > 0) {
+				ctx.blocks.splice(run.blockIndex, run.blockCount, ...blocks);
+			}
 		}
 		const finalBlocks =
 			ctx.blocks.length > 0
 				? ctx.blocks
-				: [
-						createTextBlock(
-							this._activeStreamsByThread.get(ctx.thread.id)?.stopRequested
-								? '_Generation stopped._'
-								: '_No response._',
-						),
-					];
+				: [createTextBlock(activeStream.stopRequested ? '_Generation stopped._' : '_No response._')];
 		await this._editConversationCard(ctx, finalBlocks, true);
 	}
 
