@@ -1072,12 +1072,14 @@ class ProjectSlackBot {
 
 	private _closeCurrentTextRun(ctx: ConversationContext): void {
 		const streamState = this._getSlackStreamState(ctx);
-		if (ctx.textBlockIndex !== -1) {
+		const sourceEnd = streamState.latestSourceText.length;
+		const sourceText = streamState.latestSourceText.slice(streamState.textRunStart, sourceEnd);
+		if (ctx.textBlockIndex !== -1 || sourceText.trim()) {
 			streamState.closedTextRuns.push({
-				blockIndex: ctx.textBlockIndex,
-				blockCount: ctx.textBlockCount,
+				blockIndex: ctx.textBlockIndex === -1 ? ctx.blocks.length : ctx.textBlockIndex,
+				blockCount: ctx.textBlockIndex === -1 ? 0 : ctx.textBlockCount,
 				sourceStart: streamState.textRunStart,
-				sourceEnd: streamState.latestSourceText.length,
+				sourceEnd,
 			});
 		}
 		if (streamState.tableStateAtRunEnd) {
@@ -1097,6 +1099,7 @@ class ProjectSlackBot {
 			blockIndex: number;
 			blockCount: number;
 			blocks: ReturnType<typeof createTextBlocks>;
+			sourceStart: number;
 			updatesOpenRunCount: boolean;
 		}[] = [];
 		for (const run of streamState.closedTextRuns) {
@@ -1107,21 +1110,24 @@ class ProjectSlackBot {
 					truncation: { kind: 'link', url: chatUrl },
 					tableState,
 				}),
+				sourceStart: run.sourceStart,
 				updatesOpenRunCount: false,
 			});
 		}
-		if (ctx.textBlockIndex !== -1) {
+		const openRunText = streamState.latestSourceText.slice(streamState.textRunStart);
+		if (ctx.textBlockIndex !== -1 || openRunText.trim()) {
 			replacements.push({
-				blockIndex: ctx.textBlockIndex,
-				blockCount: ctx.textBlockCount,
-				blocks: createTextBlocks(streamState.latestSourceText.slice(streamState.textRunStart), {
+				blockIndex: ctx.textBlockIndex === -1 ? ctx.blocks.length : ctx.textBlockIndex,
+				blockCount: ctx.textBlockIndex === -1 ? 0 : ctx.textBlockCount,
+				blocks: createTextBlocks(openRunText, {
 					truncation: { kind: 'link', url: chatUrl },
 					tableState,
 				}),
-				updatesOpenRunCount: true,
+				sourceStart: streamState.textRunStart,
+				updatesOpenRunCount: ctx.textBlockIndex !== -1,
 			});
 		}
-		replacements.sort((left, right) => right.blockIndex - left.blockIndex);
+		replacements.sort((left, right) => right.blockIndex - left.blockIndex || right.sourceStart - left.sourceStart);
 		for (const replacement of replacements) {
 			if (replacement.blocks.length > 0) {
 				ctx.blocks.splice(replacement.blockIndex, replacement.blockCount, ...replacement.blocks);
@@ -1147,10 +1153,10 @@ class ProjectSlackBot {
 		const visibleText = streamState.latestSourceText.slice(streamState.textRunStart);
 		const tableState = { ...streamState.tableStateAtRunStart };
 		const blocks = createTextBlocks(visibleText, { ...options, tableState });
+		streamState.tableStateAtRunEnd = tableState;
 		if (blocks.length === 0) {
 			return;
 		}
-		streamState.tableStateAtRunEnd = tableState;
 		if (ctx.textBlockIndex === -1) {
 			ctx.textBlockIndex = ctx.blocks.length;
 			ctx.blocks.push(...blocks);

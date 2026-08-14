@@ -378,6 +378,43 @@ describe('createTextBlocks', () => {
 		expect(countHiddenTableNotices([...firstBlocks, ...secondBlocks])).toBe(1);
 	});
 
+	it('restores a table-only hidden run when rendering the final message', () => {
+		const firstTable = '| First |\n|---|\n| value |';
+		const secondTable = '| Second |\n|---|\n| value |';
+		const streamingTableState = createSlackTableRenderState();
+
+		createTextBlocks(firstTable, {
+			truncation: { kind: 'hidden' },
+			tableState: streamingTableState,
+		});
+		const streamingBlocks = createTextBlocks(secondTable, {
+			truncation: { kind: 'hidden' },
+			tableState: streamingTableState,
+		});
+
+		expect(streamingBlocks).toEqual([]);
+		expect(streamingTableState.tableNumber).toBe(2);
+
+		const finalTableState = createSlackTableRenderState();
+		const finalBlocks = [
+			...createTextBlocks(firstTable, {
+				truncation: { kind: 'link', url: 'https://nao.example' },
+				tableState: finalTableState,
+			}),
+			...createTextBlocks(secondTable, {
+				truncation: { kind: 'link', url: 'https://nao.example' },
+				tableState: finalTableState,
+			}),
+		];
+
+		expect(finalBlocks.map((block) => block.type)).toEqual(['table', 'text']);
+		expect(finalBlocks[1]).toMatchObject({
+			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 2 ]*',
+			style: 'muted',
+		});
+		expect(countHiddenTableNotices(finalBlocks)).toBe(1);
+	});
+
 	it('continues hidden table numbering across calls', () => {
 		const tableState = createSlackTableRenderState();
 		createTextBlocks('| First |\n|---|\n| value |', { tableState });
