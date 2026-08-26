@@ -1,5 +1,6 @@
 import {
 	Activity,
+	CircleAlert,
 	ChevronLeft,
 	ChevronRight,
 	Code,
@@ -19,6 +20,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 
 import type { StoryViewMode } from '@/components/side-panel/story-viewer.types';
+import { useTimeAgo } from '@/hooks/use-time-ago';
 import { StoryDownload } from '@/components/story-download';
 import { Button } from '@/components/ui/button';
 import {
@@ -27,7 +29,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Switch } from '@/components/ui/switch';
+import { SwitchIndicator } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToggleFavorite } from '@/hooks/use-toggle-favorite';
 import { cn } from '@/lib/utils';
@@ -35,10 +37,17 @@ import { trpc } from '@/main';
 
 interface LiveControls {
 	isLive: boolean;
+	cachedAt?: string | Date | null;
+	lastRefreshFailure?: StoryRefreshFailure | null;
 	isRefreshing?: boolean;
 	onRefresh?: () => void;
 	/** When provided, the live state can be toggled (owner). Otherwise the badge is read-only. */
 	onOpenSettings?: () => void;
+}
+
+export interface StoryRefreshFailure {
+	errorMessage: string;
+	failedAt: string | Date;
 }
 
 interface DownloadConfig {
@@ -171,6 +180,7 @@ export function StoryPageHeader({
 				</div>
 			</header>
 
+			{live?.lastRefreshFailure && <StoryRefreshFailureBanner failure={live.lastRefreshFailure} />}
 			<StorySubHeader viewModeControls={viewModeControls} versionControls={versionControls} />
 		</div>
 	);
@@ -306,7 +316,7 @@ function StorySubHeader({
 }
 
 function LiveStoryControls({ live }: { live: LiveControls }) {
-	const { isLive, isRefreshing = false, onRefresh, onOpenSettings } = live;
+	const { isLive, cachedAt, isRefreshing = false, onRefresh, onOpenSettings } = live;
 
 	if (!onOpenSettings) {
 		if (!isLive) {
@@ -319,11 +329,12 @@ function LiveStoryControls({ live }: { live: LiveControls }) {
 						<div className='flex items-center gap-2 border rounded-full px-2 py-0.75'>
 							<Activity className='size-3.5 text-foreground' strokeWidth={2.25} />
 							<span className='text-xs font-medium'>Live story</span>
-							<Switch checked={isLive} onCheckedChange={() => {}} disabled />
+							<SwitchIndicator checked={isLive} />
 						</div>
 					</TooltipTrigger>
 					<TooltipContent>Live story</TooltipContent>
 				</Tooltip>
+				{cachedAt && <LiveStoryTimestamp cachedAt={cachedAt} />}
 				{onRefresh && <RefreshButton isRefreshing={isRefreshing} onRefresh={onRefresh} />}
 			</>
 		);
@@ -331,17 +342,22 @@ function LiveStoryControls({ live }: { live: LiveControls }) {
 
 	return (
 		<>
-			{isLive && onRefresh && <RefreshButton isRefreshing={isRefreshing} onRefresh={onRefresh} />}
 			<Tooltip>
 				<TooltipTrigger asChild>
-					<div className='flex items-center gap-2 border rounded-full px-2 py-0.75'>
+					<button
+						type='button'
+						onClick={onOpenSettings}
+						className='flex items-center gap-2 border rounded-full px-2 py-0.75 cursor-pointer hover:bg-secondary'
+					>
 						<Activity className='size-3.5 text-foreground' strokeWidth={2.25} />
 						<span className='text-xs font-medium'>Live story</span>
-						<Switch checked={isLive} onCheckedChange={onOpenSettings} />
-					</div>
+						<SwitchIndicator checked={isLive} />
+					</button>
 				</TooltipTrigger>
 				<TooltipContent>{isLive ? 'Live story settings' : 'Enable live mode'}</TooltipContent>
 			</Tooltip>
+			{isLive && cachedAt && <LiveStoryTimestamp cachedAt={cachedAt} />}
+			{isLive && onRefresh && <RefreshButton isRefreshing={isRefreshing} onRefresh={onRefresh} />}
 		</>
 	);
 }
@@ -394,5 +410,42 @@ function FavoriteButton({ storyId }: { storyId: string }) {
 			</TooltipTrigger>
 			<TooltipContent>{isFavorited ? 'Remove from favorites' : 'Add to favorites'}</TooltipContent>
 		</Tooltip>
+	);
+}
+
+export function LiveStoryTimestamp({ cachedAt }: { cachedAt: string | Date }) {
+	const timestampMs = new Date(cachedAt).getTime();
+	const timeAgo = useTimeAgo(timestampMs);
+
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<div className='flex items-center rounded-full py-0.75 text-xs text-muted-foreground -mr-1'>
+					<span>{timeAgo.humanReadable.toLowerCase()}</span>
+				</div>
+			</TooltipTrigger>
+			<TooltipContent>Updated {new Date(cachedAt).toLocaleString()}</TooltipContent>
+		</Tooltip>
+	);
+}
+
+export function StoryRefreshFailureBanner({ failure }: { failure: StoryRefreshFailure }) {
+	const failedAt = new Date(failure.failedAt);
+	const timeAgo = useTimeAgo(failedAt.getTime());
+
+	return (
+		<div
+			role='alert'
+			className='flex items-start gap-2 border-b bg-destructive/10 px-4 py-2 text-xs text-destructive md:px-6'
+		>
+			<CircleAlert className='mt-0.5 size-3.5 shrink-0' />
+			<div className='min-w-0'>
+				<span className='font-medium'>Story refresh failed.</span>{' '}
+				<span className='break-words'>{failure.errorMessage}</span>
+				<span className='ml-1 opacity-70' title={failedAt.toLocaleString()}>
+					{timeAgo.humanReadable}
+				</span>
+			</div>
+		</div>
 	);
 }

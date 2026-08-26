@@ -9,40 +9,50 @@ import { usePrevRef } from './use-prev';
 import { useMemoObject } from './useMemoObject';
 import type { UseChatHelpers } from '@ai-sdk/react';
 import type { UIMessage } from '@nao/backend/chat';
-import type { CitationData, ImageUploadData, LlmSelectedModel } from '@nao/shared/types';
+import type { ImageUploadData } from '@nao/shared/attachments';
+import type { CitationData, LlmSelectedModel } from '@nao/shared/types';
+import type { DocumentAttachment } from '@/lib/attachments';
 import type { FileUIPart, InferUIMessageChunk } from 'ai';
 import type { MentionOption } from 'prompt-mentions';
 
 import { getActiveProjectId } from '@/lib/active-project';
 import {
 	checkIsAgentRunning,
+	extractDocumentPathsFromMessage,
 	extractImagesFromMessage,
 	getLastUserMessageIdx,
+	getMessageDocuments,
+	getMessageImages,
 	getMessageText,
 	getTextFromUserMessageOrThrow,
 	NEW_CHAT_ID,
 	parseBudgetError,
+	resolveImagesFromMessage,
 } from '@/lib/ai';
 import { createLocalStorage } from '@/lib/local-storage';
 import { trpc } from '@/main';
 import { useChatQuery, useSetChat } from '@/queries/use-chat-query';
 import { agentService } from '@/services/agents';
 import { chatActivityStore } from '@/stores/chat-activity';
+import { cancellingMessageIdStore } from '@/stores/chat-cancelling-message';
+import { editedMessageIdStore } from '@/stores/chat-edited-message';
+import { chatInputRestoreStore } from '@/stores/chat-input-restore';
 import { messageQueueStore } from '@/stores/chat-message-queue';
 
 export interface AgentHelpers {
 	chatId: string | undefined;
-	messages: UIMessage[];
 	setMessages: UseChatHelpers<UIMessage>['setMessages'];
 	queueOrSendMessage: (args: SendMessageArgs) => Promise<void>;
-	editMessage: (args: { messageId: string; text: string }) => Promise<void | UIMessage>;
+	editMessage: (
+		args: { messageId: string; text: string } & Pick<SendMessageArgs, 'images' | 'documents'>,
+	) => Promise<void | UIMessage>;
 	resendMessage: (args: { messageId: string }) => Promise<void | UIMessage>;
 	switchMessageVersion: (args: { messageId: string }) => Promise<void>;
 	submitQueuedMessageNow: (messageId: string) => Promise<void>;
 	status: UseChatHelpers<UIMessage>['status'];
 	isRunning: boolean;
 	isLoadingMessages: boolean;
-	stopAgent: () => Promise<void>;
+	cancelAgent: () => Promise<void>;
 	error: Error | undefined;
 	clearError: UseChatHelpers<UIMessage>['clearError'];
 	selectedModel: LlmSelectedModel | null;
@@ -53,9 +63,15 @@ export interface AgentHelpers {
 	isReadonly?: boolean;
 }
 
+export interface AgentState extends AgentHelpers {
+	messages: UIMessage[];
+}
+
 export interface SendMessageArgs {
 	text: string;
 	images?: ImageUploadData[];
+	/** Files already uploaded to permanent storage, so the message only has to name them. */
+	documents?: DocumentAttachment[];
 	citation?: CitationData;
 }
 
@@ -72,7 +88,7 @@ interface AgentSendRefs {
 }
 const agentSendRefsStore = new WeakMap<Agent<UIMessage>, AgentSendRefs>();
 
-export const useAgent = ({ disableNavigation = false }: { disableNavigation?: boolean } = {}): AgentHelpers => {
+export const useAgent = ({ disableNavigation = false }: { disableNavigation?: boolean } = {}): AgentState => {
 	const navigate = useNavigate();
 	const chatId = useChatId();
 	const chat = useChatQuery({ chatId });
@@ -172,6 +188,7 @@ export const useAgent = ({ disableNavigation = false }: { disableNavigation?: bo
 					activeMentionsRef.current = [];
 					const citation = agentCitationStore.get(newAgent);
 					const images = extractImagesFromMessage(messageToSend);
+					const documents = extractDocumentPathsFromMessage(messageToSend);
 					const adminModeAtSend = activeAdminModeRef.current;
 					agentAdminModeStore.set(newAgent, adminModeAtSend);
 					return {
@@ -182,6 +199,7 @@ export const useAgent = ({ disableNavigation = false }: { disableNavigation?: bo
 							message: {
 								text: getTextFromUserMessageOrThrow(messageToSend),
 								images: images.length > 0 ? images : undefined,
+								documents: documents.length > 0 ? documents : undefined,
 								citation,
 							},
 							model: activeSelectedModelRef.current ?? undefined,
@@ -198,7 +216,7 @@ export const useAgent = ({ disableNavigation = false }: { disableNavigation?: bo
 				const next = canSendNextMessage ? messageQueueStore.dequeue(agentId) : undefined;
 				if (next) {
 					mentionsRef.current = next.mentions;
-					const files = imagesToFileUIParts(next.images);
+					const files = attachmentsToFileUIParts(next);
 					newAgent.sendMessage({ text: next.text, files: files.length > 0 ? files : undefined });
 				} else {
 					chatActivityStore.setRunning(agentId, false);
@@ -225,9 +243,15 @@ export const useAgent = ({ disableNavigation = false }: { disableNavigation?: bo
 
 	agentSendRefsStore.set(agentInstance, { adminModeRef, selectedModelRef, mentionsRef });
 
-	const { status, error, clearError, sendMessage, setMessages, messages } = useChat({ chat: agentInstance });
+	const { status, error, clearError, sendMessage, setMessages, messages } = useChat({
+		chat: agentInstance,
+		experimental_throttle: 8,
+	});
+	const messagesRef = useRef(messages);
+	messagesRef.current = messages;
 
 	const stopAgentMutation = useMutation(trpc.chat.stop.mutationOptions());
+	const cancelAgentMutation = useMutation(trpc.chat.cancel.mutationOptions());
 	const switchMessageVersionMutation = useMutation(trpc.chat.switchMessageVersion.mutationOptions());
 	const isRunning = checkIsAgentRunning({ status });
 
@@ -280,7 +304,7 @@ export const useAgent = ({ disableNavigation = false }: { disableNavigation?: bo
 		setAdminMode(conversationIsAdmin);
 	}, [chatId, chat.isLoading, messages, setAdminMode]);
 
-	const stopAgent = useCallback(async () => {
+	const stopCurrentGeneration = useCallback(async () => {
 		if (!chatId) {
 			return;
 		}
@@ -288,6 +312,58 @@ export const useAgent = ({ disableNavigation = false }: { disableNavigation?: bo
 		agentInstance.stop(); // Stop the agent instance to instantly stop reading the stream
 		await stopAgentMutation.mutateAsync({ chatId });
 	}, [chatId, agentInstance, stopAgentMutation.mutateAsync]); // eslint-disable-line
+
+	const cancelAgent = useCallback(async () => {
+		if (!chatId) {
+			return;
+		}
+
+		const currentMessages = messagesRef.current;
+		const lastUserMessageIndex = getLastUserMessageIdx(currentMessages);
+		const lastUserMessage = lastUserMessageIndex !== undefined ? currentMessages[lastUserMessageIndex] : undefined;
+		const lastMessage = currentMessages.at(-1);
+		const lastAssistantMessage = lastMessage?.role === 'assistant' ? lastMessage : undefined;
+
+		if (lastAssistantMessage) {
+			cancellingMessageIdStore.setCancelling(lastAssistantMessage.id);
+		}
+		agentInstance.stop();
+
+		try {
+			const result = await cancelAgentMutation.mutateAsync({ chatId });
+
+			if (result.outcome === 'kept') {
+				if (lastUserMessage) {
+					editedMessageIdStore.setEditingId(lastUserMessage.id);
+				}
+				return;
+			}
+
+			if (lastUserMessageIndex !== undefined) {
+				setMessages(currentMessages.slice(0, lastUserMessageIndex));
+			}
+			const restorePayload = lastUserMessage
+				? {
+						text: getMessageText(lastUserMessage),
+						images: getMessageImages(lastUserMessage),
+						documents: getMessageDocuments(lastUserMessage),
+						citation: lastUserMessage.citation,
+					}
+				: undefined;
+
+			if (result.chatDeleted) {
+				queryClient.invalidateQueries({ queryKey: [['chat', 'listGrouped']] });
+				await navigate({ to: '/' });
+				if (restorePayload) {
+					chatInputRestoreStore.set(restorePayload);
+				}
+			} else if (restorePayload) {
+				chatInputRestoreStore.set(restorePayload);
+			}
+		} finally {
+			cancellingMessageIdStore.setCancelling(undefined);
+		}
+	}, [chatId, agentInstance, cancelAgentMutation.mutateAsync, setMessages, navigate, queryClient]); // eslint-disable-line
 
 	const handleSendMessage = useCallback<UseChatHelpers<UIMessage>['sendMessage']>(
 		async (...args) => {
@@ -298,27 +374,26 @@ export const useAgent = ({ disableNavigation = false }: { disableNavigation?: bo
 	);
 
 	const queueOrSendMessage = useCallback(
-		async ({ text, images, citation }: SendMessageArgs) => {
-			if (!text.trim() && !images?.length) {
+		async ({ text, images, documents, citation }: SendMessageArgs) => {
+			const prompt = text.trim() || defaultAttachmentPrompt({ images, documents });
+			if (!prompt) {
 				return;
 			}
 
 			if (!isRunning) {
 				agentCitationStore.set(agentInstance, citation);
-				const files = imagesToFileUIParts(images);
-				return handleSendMessage({
-					text: text || (images?.length ? 'Describe this image' : ''),
-					files: files.length > 0 ? files : undefined,
-				});
+				const files = attachmentsToFileUIParts({ images, documents });
+				return handleSendMessage({ text: prompt, files: files.length > 0 ? files : undefined });
 			}
 
 			const mentions = [...mentionsRef.current];
 			mentionsRef.current = [];
 
 			messageQueueStore.enqueue(chatIdRef.current, {
-				text,
+				text: prompt,
 				mentions,
 				images,
+				documents,
 			});
 		},
 		[isRunning, handleSendMessage, agentInstance],
@@ -327,32 +402,52 @@ export const useAgent = ({ disableNavigation = false }: { disableNavigation?: bo
 	const submitQueuedMessageNow = useCallback(
 		async (messageId: string) => {
 			messageQueueStore.promoteToFront(chatIdRef.current, messageId);
-			await stopAgent();
+			await stopCurrentGeneration();
 			const next = messageQueueStore.dequeue(chatIdRef.current ?? NEW_CHAT_ID);
 			if (next) {
 				mentionsRef.current = next.mentions;
-				await handleSendMessage({ text: next.text });
+				const files = attachmentsToFileUIParts(next);
+				await handleSendMessage({ text: next.text, files: files.length > 0 ? files : undefined });
 			}
 		},
-		[stopAgent, handleSendMessage],
+		[stopCurrentGeneration, handleSendMessage],
 	);
 
 	const editMessage = useCallback(
-		async ({ messageId, text }: { messageId: string; text: string }) => {
-			const trimmedText = text.trim();
-			if (!trimmedText || isRunning) {
+		async ({
+			messageId,
+			text,
+			images: newImages,
+			documents: newDocuments,
+		}: { messageId: string; text: string } & Pick<SendMessageArgs, 'images' | 'documents'>) => {
+			if (isRunning) {
 				return;
 			}
 
-			const messageIndex = messages.findIndex((message) => message.id === messageId);
+			const currentMessages = messagesRef.current;
+			const messageIndex = currentMessages.findIndex((message) => message.id === messageId);
 			if (messageIndex === -1) {
 				return;
 			}
 
-			setMessages(messages.slice(0, messageIndex));
-			return handleSendMessage({ text: trimmedText }, { body: { messageToEditId: messageId } });
+			const original = currentMessages[messageIndex];
+			const originalImages = await resolveImagesFromMessage(original);
+			const images = [...originalImages, ...(newImages ?? [])];
+			const documents = [...getMessageDocuments(original), ...(newDocuments ?? [])];
+			const prompt = text.trim() || defaultAttachmentPrompt({ images, documents });
+			if (!prompt) {
+				return;
+			}
+
+			agentCitationStore.set(agentInstance, original.citation);
+			setMessages(currentMessages.slice(0, messageIndex));
+			const files = attachmentsToFileUIParts({ images, documents });
+			return handleSendMessage(
+				{ text: prompt, files: files.length > 0 ? files : undefined },
+				{ body: { messageToEditId: messageId } },
+			);
 		},
-		[messages, setMessages, isRunning, handleSendMessage],
+		[setMessages, isRunning, handleSendMessage, agentInstance],
 	);
 
 	const resendMessage = useCallback(
@@ -361,22 +456,29 @@ export const useAgent = ({ disableNavigation = false }: { disableNavigation?: bo
 				return;
 			}
 
-			const messageIndex = messages.findIndex((message) => message.id === messageId);
+			const currentMessages = messagesRef.current;
+			const messageIndex = currentMessages.findIndex((message) => message.id === messageId);
 			if (messageIndex === -1) {
 				return;
 			}
 
-			const original = messages[messageIndex];
-			const text = getMessageText(original).trim();
+			const original = currentMessages[messageIndex];
+			const images = await resolveImagesFromMessage(original);
+			const documents = getMessageDocuments(original);
+			const text = getMessageText(original).trim() || defaultAttachmentPrompt({ images, documents });
 			if (!text) {
 				return;
 			}
 
 			agentCitationStore.set(agentInstance, original.citation);
-			setMessages(messages.slice(0, messageIndex));
-			return handleSendMessage({ text }, { body: { messageToEditId: messageId } });
+			setMessages(currentMessages.slice(0, messageIndex));
+			const files = attachmentsToFileUIParts({ images, documents });
+			return handleSendMessage(
+				{ text, files: files.length > 0 ? files : undefined },
+				{ body: { messageToEditId: messageId } },
+			);
 		},
-		[messages, setMessages, isRunning, handleSendMessage, agentInstance],
+		[setMessages, isRunning, handleSendMessage, agentInstance],
 	);
 
 	const switchMessageVersion = useCallback(
@@ -389,7 +491,7 @@ export const useAgent = ({ disableNavigation = false }: { disableNavigation?: bo
 			await switchMessageVersionMutation.mutateAsync({ chatId: targetChatId, messageId });
 			await queryClient.invalidateQueries({ queryKey: trpc.chat.get.queryKey({ chatId: targetChatId }) });
 		},
-		[isRunning, switchMessageVersionMutation, queryClient],
+		[isRunning, switchMessageVersionMutation.mutateAsync, queryClient], // eslint-disable-line
 	);
 
 	return useMemoObject({
@@ -404,7 +506,7 @@ export const useAgent = ({ disableNavigation = false }: { disableNavigation?: bo
 		status,
 		isRunning,
 		isLoadingMessages: chat.isLoading,
-		stopAgent,
+		cancelAgent,
 		error,
 		clearError,
 		selectedModel,
@@ -416,7 +518,7 @@ export const useAgent = ({ disableNavigation = false }: { disableNavigation?: bo
 };
 
 /** Sync the messages between the useChat hook and the query client. */
-export const useSyncMessages = ({ agent }: { agent: AgentHelpers }) => {
+export const useSyncMessages = ({ agent }: { agent: AgentState }) => {
 	const chatId = useChatId();
 	const chat = useChatQuery({ chatId });
 	const setChat = useSetChat();
@@ -456,15 +558,39 @@ export const useSyncMessages = ({ agent }: { agent: AgentHelpers }) => {
 	}, [agent.isRunning, setChat, chatId]);
 };
 
-function imagesToFileUIParts(images?: ImageUploadData[]): FileUIPart[] {
-	if (!images?.length) {
-		return [];
+/** What to ask when someone attaches files without typing anything. */
+function defaultAttachmentPrompt({
+	images,
+	documents,
+}: {
+	images?: { length: number };
+	documents?: { length: number };
+}): string {
+	if (documents?.length) {
+		return images?.length ? 'Have a look at these files' : 'Have a look at this data';
 	}
-	return images.map((img) => ({
-		type: 'file' as const,
-		mediaType: img.mediaType,
-		url: `data:${img.mediaType};base64,${img.data}`,
-	}));
+	return images?.length ? 'Describe this image' : '';
+}
+
+/**
+ * Both kinds of attachment ride along as file parts, so the optimistic message shows them
+ * straight away. An image carries its bytes as a data URL; a document is already in
+ * permanent storage and carries the path it was saved at.
+ */
+function attachmentsToFileUIParts({ images, documents }: Pick<SendMessageArgs, 'images' | 'documents'>): FileUIPart[] {
+	return [
+		...(images ?? []).map((image) => ({
+			type: 'file' as const,
+			mediaType: image.mediaType,
+			url: `data:${image.mediaType};base64,${image.data}`,
+		})),
+		...(documents ?? []).map((document) => ({
+			type: 'file' as const,
+			mediaType: document.mediaType,
+			filename: document.filename,
+			url: document.path,
+		})),
+	];
 }
 
 /** Dispose inactive agents to free up memory */

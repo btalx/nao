@@ -1,4 +1,9 @@
-import type { McpChartEmbedStoredConfig } from '@nao/shared';
+import type {
+	BackgroundModelSettings,
+	MapSettings,
+	McpChartEmbedStoredConfig,
+	McpMapEmbedStoredConfig,
+} from '@nao/shared';
 import type { DisplaySettings } from '@nao/shared/date';
 import type {
 	AnalyticsEventMetadata,
@@ -38,17 +43,19 @@ import { AgentSettings } from '../types/agent-settings';
 import { AUTOMATION_RUN_STATUSES, AutomationIntegrationConfig, AutomationIntegrationResult } from '../types/automation';
 import { ForkMetadata, MESSAGE_SOURCES, StopReason, ToolState, UIMessagePartType } from '../types/chat';
 import {
+	CONTEXT_RECOMMENDATION_CATEGORIES,
 	CONTEXT_RECOMMENDATION_FIX_KINDS,
+	CONTEXT_RECOMMENDATION_FIX_TARGETS,
 	CONTEXT_RECOMMENDATION_FREQUENCIES,
+	CONTEXT_RECOMMENDATION_ROOT_CAUSE_KINDS,
 	CONTEXT_RECOMMENDATION_RUN_STATUSES,
 	CONTEXT_RECOMMENDATION_RUN_TRIGGERS,
-	CONTEXT_RECOMMENDATION_SEVERITIES,
 	CONTEXT_RECOMMENDATION_STATUSES,
 	ProposedEdit,
 	RecommendationImpact,
 	RecommendationInsight,
 } from '../types/context-recommendation';
-import { LLM_INFERENCE_TYPES } from '../types/llm';
+import { LLM_INFERENCE_TYPES, type ModelSettingsMap } from '../types/llm';
 import { LOG_LEVELS, LOG_SOURCES } from '../types/log';
 import { McpEndpointSettings } from '../types/mcp-endpoint';
 import { MEMORY_CATEGORIES } from '../types/memory';
@@ -201,6 +208,8 @@ export const project = pgTable(
 		whatsappSettings: jsonb('whatsapp_settings').$type<WhatsappSettings>(),
 		mcpEndpointSettings: jsonb('mcp_endpoint_settings').$type<McpEndpointSettings>(),
 		displaySettings: jsonb('display_settings').$type<DisplaySettings>(),
+		mapSettings: jsonb('map_settings').$type<MapSettings>(),
+		defaultModels: jsonb('default_models').$type<BackgroundModelSettings>(),
 
 		createdAt: timestamp('created_at').defaultNow().notNull(),
 		updatedAt: timestamp('updated_at')
@@ -345,9 +354,11 @@ export const messagePart = pgTable(
 		toolProviderMetadata: jsonb('tool_provider_metadata').$type<ProviderMetadata>(),
 		providerMetadata: jsonb('provider_metadata').$type<ProviderMetadata>(),
 
-		// file/image columns
+		// file columns: images live in message_image, other attachments in permanent storage
 		mediaType: text('media_type'),
 		imageId: text('image_id').references(() => messageImage.id, { onDelete: 'set null' }),
+		storagePath: text('storage_path'),
+		filename: text('filename'),
 	},
 	(t) => [
 		index('parts_message_id_idx').on(t.messageId),
@@ -366,7 +377,7 @@ export const messagePart = pgTable(
 		),
 		check(
 			'file_fields_required',
-			sql`CASE WHEN ${t.type} = 'file' THEN ${t.mediaType} IS NOT NULL AND ${t.imageId} IS NOT NULL ELSE TRUE END`,
+			sql`CASE WHEN ${t.type} = 'file' THEN ${t.mediaType} IS NOT NULL AND (${t.imageId} IS NOT NULL OR ${t.storagePath} IS NOT NULL) ELSE TRUE END`,
 		),
 	],
 );
@@ -427,6 +438,7 @@ export const projectLlmConfig = pgTable(
 			>()
 			.default([])
 			.notNull(),
+		modelSettings: jsonb('model_settings').$type<ModelSettingsMap>().default({}).notNull(),
 		baseUrl: text('base_url'),
 		createdAt: timestamp('created_at').defaultNow().notNull(),
 		updatedAt: timestamp('updated_at')
@@ -451,6 +463,7 @@ export const projectProviderBudget = pgTable(
 			.references(() => project.id, { onDelete: 'cascade' }),
 		provider: text('provider').$type<LlmProvider>().notNull(),
 		limitUsd: integer('limit_usd').notNull(),
+		perUserLimitUsd: integer('per_user_limit_usd'),
 		period: text('period', { enum: BUDGET_PERIODS }).notNull(),
 		currentPeriodStart: timestamp('current_period_start').defaultNow().notNull(),
 		createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -648,8 +661,6 @@ export const contextRecommendationConfig = pgTable('context_recommendation_confi
 	projectId: text('project_id')
 		.primaryKey()
 		.references(() => project.id, { onDelete: 'cascade' }),
-	modelProvider: text('model_provider').$type<LlmProvider>(),
-	modelId: text('model_id'),
 	frequency: text('frequency', { enum: CONTEXT_RECOMMENDATION_FREQUENCIES }),
 	customSystemPromptInstructions: text('custom_system_prompt_instructions'),
 	repoFullName: text('repo_full_name'),
@@ -662,6 +673,29 @@ export const contextRecommendationConfig = pgTable('context_recommendation_confi
 		.$onUpdate(() => new Date())
 		.notNull(),
 });
+
+export const contextBranchOwnership = pgTable(
+	'context_branch_ownership',
+	{
+		id: text('id')
+			.$defaultFn(() => crypto.randomUUID())
+			.primaryKey(),
+		projectId: text('project_id')
+			.notNull()
+			.references(() => project.id, { onDelete: 'cascade' }),
+		branch: text('branch').notNull(),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		reviewRequestUrl: text('review_request_url'),
+		reviewRequestKind: text('review_request_kind', { enum: ['created', 'link'] }),
+		createdAt: timestamp('created_at').defaultNow().notNull(),
+	},
+	(t) => [
+		unique('context_branch_ownership_project_branch_unique').on(t.projectId, t.branch),
+		index('context_branch_ownership_userId_idx').on(t.userId),
+	],
+);
 
 export const contextRecommendation = pgTable(
 	'context_recommendation',
@@ -677,8 +711,6 @@ export const contextRecommendation = pgTable(
 		suggestedFile: text('suggested_file').notNull(),
 		subjectKey: text('subject_key').notNull(),
 		status: text('status', { enum: CONTEXT_RECOMMENDATION_STATUSES }).notNull().default('open'),
-		snoozedUntil: timestamp('snoozed_until'),
-		severity: text('severity', { enum: CONTEXT_RECOMMENDATION_SEVERITIES }).notNull().default('medium'),
 		impactScore: integer('impact_score').notNull().default(0),
 		impact: jsonb('impact').$type<RecommendationImpact>(),
 		insights: jsonb('insights').$type<RecommendationInsight[]>().notNull().default([]),
@@ -686,6 +718,10 @@ export const contextRecommendation = pgTable(
 		summary: text('summary').notNull(),
 		suggestedAction: text('suggested_action').notNull(),
 		fixKind: text('fix_kind', { enum: CONTEXT_RECOMMENDATION_FIX_KINDS }),
+		fixTarget: text('fix_target', { enum: CONTEXT_RECOMMENDATION_FIX_TARGETS }),
+		category: text('category', { enum: CONTEXT_RECOMMENDATION_CATEGORIES }),
+		rootCause: text('root_cause'),
+		rootCauseKind: text('root_cause_kind', { enum: CONTEXT_RECOMMENDATION_ROOT_CAUSE_KINDS }),
 		proposedEdits: jsonb('proposed_edits').$type<ProposedEdit[]>(),
 		fixGuidance: text('fix_guidance'),
 		fixPrompt: text('fix_prompt'),
@@ -712,6 +748,23 @@ export const contextRecommendation = pgTable(
 			foreignColumns: [contextRecommendationRun.id, contextRecommendationRun.projectId],
 			name: 'context_recommendation_run_fk',
 		}),
+	],
+);
+
+export const contextRecommendationLinkedFeedback = pgTable(
+	'context_recommendation_linked_feedback',
+	{
+		recommendationId: text('recommendation_id')
+			.notNull()
+			.references(() => contextRecommendation.id, { onDelete: 'cascade' }),
+		messageId: text('message_id')
+			.notNull()
+			.references(() => chatMessage.id, { onDelete: 'cascade' }),
+		createdAt: timestamp('created_at').defaultNow().notNull(),
+	},
+	(t) => [
+		primaryKey({ columns: [t.recommendationId, t.messageId] }),
+		index('context_recommendation_linked_feedback_message_id_idx').on(t.messageId),
 	],
 );
 
@@ -810,6 +863,20 @@ export const mcpChartEmbed = pgTable(
 		createdAt: timestamp('created_at').defaultNow().notNull(),
 	},
 	(t) => [index('mcp_chart_embed_query_id_idx').on(t.queryId)],
+);
+
+export const mcpMapEmbed = pgTable(
+	'mcp_map_embed',
+	{
+		mapEmbedId: text('map_embed_id').primaryKey(),
+		queryId: text('query_id')
+			.notNull()
+			.references(() => mcpQueryData.queryId, { onDelete: 'cascade' }),
+		mapConfig: jsonb('map_config').$type<McpMapEmbedStoredConfig>().notNull(),
+		sourceChatId: text('source_chat_id'),
+		createdAt: timestamp('created_at').defaultNow().notNull(),
+	},
+	(t) => [index('mcp_map_embed_query_id_idx').on(t.queryId)],
 );
 
 export const storyDataCache = pgTable('story_data_cache', {

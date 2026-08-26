@@ -5,15 +5,15 @@ import { NegativeFeedbackDialog } from './chat-messages/assistant-message-action
 import { Button } from './ui/button';
 import StoryIcon from './ui/story-icon';
 import type { UIMessage, UIToolPart } from '@nao/backend/chat';
-import { useAgentContext } from '@/contexts/agent.provider';
+import { useAgentContext, useAgentMessages } from '@/contexts/agent.provider';
 import { useChatId } from '@/hooks/use-chat-id';
 import { useInactivityTrigger } from '@/hooks/use-inactivity-trigger';
-import { checkAssistantMessageHasContent, getToolName, NEW_CHAT_ID } from '@/lib/ai';
+import { useStoryIds } from '@/hooks/use-story-ids';
+import { checkAssistantMessageHasContent, NEW_CHAT_ID } from '@/lib/ai';
 import { countDisplayCharts } from '@/lib/charts.utils';
 import { createLocalStorage } from '@/lib/local-storage';
 import { lastUserMessagePayload } from '@/lib/mcp-auth-retry';
 import { openMcpConnectPopup } from '@/lib/mcp-oauth';
-import { findStoryIds } from '@/lib/story.utils';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/main';
 
@@ -212,7 +212,8 @@ interface McpAuthSuggestion {
  * account, and offers an inline Connect action. On success it re-sends the user's last request.
  */
 function useMcpAuthSuggestion(): McpAuthSuggestion {
-	const { messages, isRunning, queueOrSendMessage } = useAgentContext();
+	const { isRunning, queueOrSendMessage } = useAgentContext();
+	const messages = useAgentMessages();
 	const chatId = useChatId();
 
 	const [connecting, setConnecting] = useState(false);
@@ -250,7 +251,7 @@ function useMcpAuthSuggestion(): McpAuthSuggestion {
 	return { isVisible: !!pendingServer && !isRunning, server: pendingServer, connecting, connect, dismiss };
 }
 
-/** Returns the server from the most recent `mcp_call` that reported it needs the user to connect. */
+/** Returns the server from the most recent MCP tool call that reported it needs the user to connect. */
 function findPendingAuthServer(messages: UIMessage[]): string | null {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const message = messages[i];
@@ -261,9 +262,6 @@ function findPendingAuthServer(messages: UIMessage[]): string | null {
 			const part = message.parts[j];
 			const type = (part as { type: string }).type;
 			if (type !== 'dynamic-tool' && !type.startsWith('tool-')) {
-				continue;
-			}
-			if (getToolName(part as UIToolPart) !== 'mcp_call') {
 				continue;
 			}
 			const output = (part as UIToolPart).output as { mcpAuthRequired?: boolean; server?: string } | undefined;
@@ -283,14 +281,15 @@ interface StorySuggestion {
 }
 
 function useStorySuggestion(): StorySuggestion {
-	const { messages, isRunning, queueOrSendMessage } = useAgentContext();
+	const { isRunning, queueOrSendMessage } = useAgentContext();
+	const messages = useAgentMessages();
 	const chatId = useChatId();
 
 	const [neverPropose, setNeverPropose] = useState(() => storyProposalDisabledStorage.get() ?? false);
 	const [dismissedChats, setDismissedChats] = useState<ReadonlySet<string>>(() => new Set());
 
 	const chartCount = useMemo(() => countDisplayCharts(messages), [messages]);
-	const hasStory = useMemo(() => findStoryIds(messages).length > 0, [messages]);
+	const hasStory = useStoryIds().length > 0;
 
 	const isPersistedChat = !!chatId && chatId !== NEW_CHAT_ID;
 	const isDismissed = !!chatId && dismissedChats.has(chatId);
@@ -332,7 +331,8 @@ interface ConversationFeedback {
 }
 
 function useConversationFeedback(): ConversationFeedback {
-	const { messages, isRunning } = useAgentContext();
+	const { isRunning } = useAgentContext();
+	const messages = useAgentMessages();
 	const chatId = useChatId();
 
 	const [dismissedChats, setDismissedChats] = useState<ReadonlySet<string>>(() => new Set());

@@ -1,6 +1,7 @@
 import { createMemoryState } from '@chat-adapter/state-memory';
 import { createTelegramAdapter } from '@chat-adapter/telegram';
-import { CITATION_TAG_REGEX } from '@nao/shared';
+import { stripAssistantTags } from '@nao/shared';
+import { displayChart } from '@nao/shared/tools';
 import type { LlmSelectedModel } from '@nao/shared/types';
 import { InferUIMessageChunk, readUIMessageStream } from 'ai';
 import { Card, CardElement, Chat, Message, SentMessage, Thread } from 'chat';
@@ -19,9 +20,12 @@ import {
 	createPlainTextBlock,
 	createSummaryToolCalls,
 	createTelegramCompletionCard,
+	createTelegramMapLinkCard,
 	createTelegramStopButtonCard,
 	EXCLUDED_TOOLS,
+	formatClarificationText,
 	formatMessagingError,
+	renderMapImage,
 } from '../utils/messaging-provider';
 import { agentService } from './agent';
 import { posthog, PostHogEvent } from './posthog';
@@ -278,6 +282,7 @@ class TelegramService {
 		const agent = await agentService.create(
 			{ ...chat, userId: ctx.user!.id, projectId: this._projectId },
 			this._modelSelection,
+			{ supportsCustomCharts: false },
 		);
 		ctx.modelId = agent.getModelId();
 		return agent.stream(chat.messages, { provider: 'telegram', timezone: ctx.timezone });
@@ -288,7 +293,7 @@ class TelegramService {
 		ctx: ConversationContext,
 	): Promise<StreamState & { lastMessage: UIMessage | null }> {
 		const state: StreamState = {
-			renderedChartIds: new Set(),
+			renderedToolCallIds: new Set(),
 			sqlOutputs: new Map(),
 			lastUpdateAt: Date.now(),
 			toolGroup: new Map(),
@@ -316,6 +321,10 @@ class TelegramService {
 				this._handleSqlPart(part, state);
 			} else if (part.type === 'tool-display_chart') {
 				await this._handleChartPart(part, state, ctx);
+			} else if (part.type === 'tool-display_map') {
+				await this._handleMapPart(part, state, ctx);
+			} else if (part.type === 'tool-clarification') {
+				this._handleClarificationPart(part, state, ctx);
 			}
 			lastMessage = uiMessage;
 		}
@@ -336,6 +345,19 @@ class TelegramService {
 				throw error;
 			}
 		}
+	}
+
+	private _handleClarificationPart(
+		part: Extract<UIMessagePart, { type: 'tool-clarification' }>,
+		state: StreamState,
+		ctx: ConversationContext,
+	): void {
+		if (part.state === 'input-streaming' || !part.input) {
+			return;
+		}
+		this._flushToolGroup(state, ctx);
+		const text = formatClarificationText(part.input.question, part.input.options);
+		this._updateTextBlock(text, ctx);
 	}
 
 	private async _handleTextPart(
@@ -367,7 +389,13 @@ class TelegramService {
 		state: StreamState,
 		ctx: ConversationContext,
 	): Promise<void> {
-		if (part.state !== 'output-available' || state.renderedChartIds.has(part.toolCallId)) {
+		if (part.state !== 'output-available' || state.renderedToolCallIds.has(part.toolCallId)) {
+			return;
+		}
+		if (!part.output?.success) {
+			return;
+		}
+		if (displayChart.isTableInput(part.input)) {
 			return;
 		}
 		const sqlOutput = state.sqlOutputs.get(part.input.query_id);
@@ -381,7 +409,7 @@ class TelegramService {
 				data: sqlOutput.rows,
 				dateFormat: displaySettings.dateFormat,
 			});
-			state.renderedChartIds.add(part.toolCallId);
+			state.renderedToolCallIds.add(part.toolCallId);
 			ctx.textBlockIndex = -1;
 
 			await ctx.thread.post({
@@ -394,6 +422,58 @@ class TelegramService {
 			}
 		} catch (error) {
 			console.error('Error generating chart image:', error);
+		}
+	}
+
+	private async _handleMapPart(
+		part: Extract<UIMessagePart, { type: 'tool-display_map' }>,
+		state: StreamState,
+		ctx: ConversationContext,
+	): Promise<void> {
+		if (
+			part.state !== 'output-available' ||
+			!part.output.success ||
+			state.renderedToolCallIds.has(part.toolCallId)
+		) {
+			return;
+		}
+		state.renderedToolCallIds.add(part.toolCallId);
+		const png = await renderMapImage(part, state, this._projectId, { toolCallId: part.toolCallId });
+		if (!png) {
+			await this._pushMapLinkCard(part, ctx);
+			return;
+		}
+		try {
+			ctx.textBlockIndex = -1;
+			await ctx.thread.post({
+				markdown: '',
+				files: [{ data: png, filename: 'map.png' }],
+			});
+			if (ctx.convMessage) {
+				await this._safeEdit(ctx.convMessage, Card({ children: ctx.blocks }));
+			}
+		} catch (error) {
+			console.error('Error posting map image:', error);
+			await this._pushMapLinkCard(part, ctx);
+		}
+	}
+
+	private async _pushMapLinkCard(
+		part: Extract<UIMessagePart, { type: 'tool-display_map' }>,
+		ctx: ConversationContext,
+	): Promise<void> {
+		if (part.state !== 'output-available') {
+			return;
+		}
+		try {
+			const chatUrl = new URL(ctx.chatId, this._redirectUrl).toString();
+			ctx.textBlockIndex = -1;
+			ctx.blocks.push(...createTelegramMapLinkCard(part.input.title, chatUrl));
+			if (ctx.convMessage) {
+				await this._safeEdit(ctx.convMessage, Card({ children: ctx.blocks }));
+			}
+		} catch (error) {
+			console.error('Error rendering map link card:', error);
 		}
 	}
 
@@ -448,7 +528,7 @@ class TelegramService {
 	}
 
 	private _updateTextBlock(text: string, ctx: ConversationContext): void {
-		const block = createPlainTextBlock(text.replace(CITATION_TAG_REGEX, ''));
+		const block = createPlainTextBlock(stripAssistantTags(text));
 		if (ctx.textBlockIndex === -1) {
 			ctx.textBlockIndex = ctx.blocks.length;
 			ctx.blocks.push(block);

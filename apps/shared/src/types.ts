@@ -1,3 +1,5 @@
+import type { DocumentExtension } from './attachments';
+
 export type UserRole = 'admin' | 'user' | 'viewer' | 'context_admin';
 
 export const USER_ROLES = ['admin', 'user', 'viewer', 'context_admin'] as const satisfies readonly UserRole[];
@@ -17,11 +19,21 @@ export const TOOL_CALL_DENSITIES = ['compact', 'detailed'] as const;
 /** How much detail to show for tool calls in the chat. */
 export type ToolCallDensity = (typeof TOOL_CALL_DENSITIES)[number];
 
+export const DEFAULT_PYTHON_EXECUTION_DURATION_SECS = 30;
+export const MIN_PYTHON_EXECUTION_DURATION_SECS = 1;
+export const MAX_PYTHON_EXECUTION_DURATION_SECS = 600;
+
 export interface UserPreferences {
 	toolCallDensity?: ToolCallDensity;
 }
 
 export type UpdatedAtFilter = { mode: 'single'; value: string } | { mode: 'range'; start: string; end: string };
+
+export const CHAT_REPLAY_TOOL_STATES = ['noToolsUsed', 'toolsNoErrors', 'toolsWithErrors'] as const;
+export type ChatReplayToolState = (typeof CHAT_REPLAY_TOOL_STATES)[number];
+
+export const CHAT_REPLAY_FEEDBACK_STATES = ['noVotes', 'upvotes', 'downvotes'] as const;
+export type ChatReplayFeedbackState = (typeof CHAT_REPLAY_FEEDBACK_STATES)[number];
 
 export const NO_CACHE_SCHEDULE = 'no-cache';
 
@@ -35,9 +47,13 @@ export const LLM_PROVIDERS = [
 	'bedrock',
 	'vertex',
 	'azure',
+	'qwen',
+	'minimax',
+	'moonshot',
+	'openaiCompatible',
 ] as const;
 
-export const providerLabels: Record<LlmProvider, string> = {
+export const providerLabels: Record<LlmProviderKind, string> = {
 	openai: 'OpenAI',
 	anthropic: 'Anthropic',
 	google: 'Google',
@@ -47,9 +63,69 @@ export const providerLabels: Record<LlmProvider, string> = {
 	bedrock: 'Amazon Bedrock',
 	vertex: 'Vertex AI',
 	azure: 'Azure Foundry',
+	qwen: 'Qwen',
+	minimax: 'MiniMax',
+	moonshot: 'Moonshot',
+	openaiCompatible: 'OpenAI Compatible',
 };
 
-export type LlmProvider = (typeof LLM_PROVIDERS)[number];
+/** One of nao's built-in provider integrations. */
+export type LlmProviderKind = (typeof LLM_PROVIDERS)[number];
+
+/** The only kind a project can declare several times, each instance under a name of its own. */
+export const NAMED_PROVIDER_KIND = 'openaiCompatible';
+const NAMED_PROVIDER_SEPARATOR = '/';
+const PROVIDER_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
+/** An instance of the named kind, as an admin declared it, e.g. `openaiCompatible/my-vllm`. */
+export type NamedLlmProvider = `${typeof NAMED_PROVIDER_KIND}/${string}`;
+
+/**
+ * How a project addresses a provider, and how every model, message and budget refers to it: either
+ * a built-in kind, or a named instance of the kind that allows them.
+ */
+export type LlmProvider = LlmProviderKind | NamedLlmProvider;
+
+/** The built-in integration backing a provider, which is the provider itself unless it is named. */
+export function providerKind(provider: LlmProvider): LlmProviderKind {
+	return provider.split(NAMED_PROVIDER_SEPARATOR)[0] as LlmProviderKind;
+}
+
+/** The name given to a provider instance, or null when the provider is a built-in kind. */
+export function providerName(provider: LlmProvider): string | null {
+	const separator = provider.indexOf(NAMED_PROVIDER_SEPARATOR);
+	return separator === -1 ? null : provider.slice(separator + 1);
+}
+
+/** What to call a provider on screen: the name its admin gave it, or the name of its integration. */
+export function providerLabel(provider: LlmProvider): string {
+	return providerName(provider) ?? providerLabels[providerKind(provider)];
+}
+
+/** Turn what an admin typed into a provider name, or null when nothing usable is left of it. */
+export function toProviderName(input: string): string | null {
+	const name = input
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '');
+	return PROVIDER_NAME_PATTERN.test(name) ? name : null;
+}
+
+export function toNamedProvider(name: string): LlmProvider {
+	return `${NAMED_PROVIDER_KIND}${NAMED_PROVIDER_SEPARATOR}${name}`;
+}
+
+export function isLlmProvider(value: string): value is LlmProvider {
+	const [kind, ...rest] = value.split(NAMED_PROVIDER_SEPARATOR);
+	if (!(LLM_PROVIDERS as readonly string[]).includes(kind)) {
+		return false;
+	}
+	if (rest.length === 0) {
+		return true;
+	}
+	return kind === NAMED_PROVIDER_KIND && rest.length === 1 && PROVIDER_NAME_PATTERN.test(rest[0]);
+}
 
 export type LlmSelectedModel = {
 	provider: LlmProvider;
@@ -60,7 +136,8 @@ export type SummarySegment =
 	| { type: 'text'; content: string }
 	| { type: 'chart'; chartType: string; title: string; kpiCount?: number }
 	| { type: 'table'; title: string }
-	| { type: 'grid'; cols: number; children: SummarySegment[] };
+	| { type: 'map'; mapType: string; title: string }
+	| { type: 'grid'; cols: number; widths: number[] | null; children: SummarySegment[] };
 
 export type StorySummary = {
 	segments: SummarySegment[];
@@ -73,12 +150,83 @@ export type FileTreeEntry = {
 	children?: FileTreeEntry[];
 };
 
-export const ALLOWED_IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
-export type ImageMediaType = (typeof ALLOWED_IMAGE_MEDIA_TYPES)[number];
+export type ContextGitUnavailableReason =
+	| 'github-unavailable'
+	| 'git-unavailable'
+	| 'no-token'
+	| 'no-repo'
+	| 'unsupported-provider'
+	| 'project-not-found'
+	| 'project-ambiguous';
 
-export type ImageUploadData = {
-	mediaType: ImageMediaType;
-	data: string;
+export type FileEditabilityReason =
+	| ContextGitUnavailableReason
+	| 'generated'
+	| 'rendered-template'
+	| 'synced-source'
+	| 'not-tracked';
+
+export type FileEditabilityGuidance =
+	| {
+			message: string;
+			actionKind: 'file' | 'route';
+			actionPath: string;
+			actionLabel: string;
+	  }
+	| {
+			message: string;
+			actionKind: null;
+			actionPath: null;
+			actionLabel: null;
+	  };
+
+export type FileContentResponse = {
+	content: string;
+	hash: string;
+	isEditable: boolean;
+	reason: FileEditabilityReason | null;
+	guidance?: FileEditabilityGuidance;
+};
+
+export type FileWriteResponse = {
+	hash: string;
+};
+
+export type FileContentSearchResult = {
+	path: string;
+	count: number;
+	line: number;
+	text: string;
+};
+
+export type FileContentSearchResponse = {
+	results: FileContentSearchResult[];
+	truncated: boolean;
+};
+
+export type ContextChangedFile = {
+	path: string;
+	kind: 'modified' | 'untracked' | 'deleted';
+	additions: number | null;
+	deletions: number | null;
+};
+
+export type ContextBranchInfo = {
+	currentBranch: string | null;
+	defaultBranch: string;
+	aheadCommitCount: number;
+	unpushedCommitCount: number;
+	branches: string[];
+	suggestedBranch: string;
+};
+
+export type ContextBranchCreationResult = ContextBranchInfo & {
+	usedFallbackBase: boolean;
+};
+
+export type ContextFileDiff = ContextChangedFile & {
+	oldContent: string;
+	newContent: string;
 };
 
 export const WARNING_BUDGET_THRESHOLD = 0.8;
@@ -121,8 +269,11 @@ export type ProjectChatListItem = {
 	userName: string;
 	userRole: UserRole | null;
 	title: string;
+	source: string | null;
 	numberOfMessages: number;
 	totalTokens: number;
+	cacheReadTokens: number;
+	totalCost: number;
 	feedbackText: string;
 	downvotes: number;
 	upvotes: number;
@@ -133,10 +284,11 @@ export type ProjectChatListItem = {
 export type DownloadFormat = 'pdf' | 'html';
 export const DOWNLOAD_FORMATS = ['pdf', 'html'] as const satisfies readonly DownloadFormat[];
 
-export type ChatDownloadFormat = 'png' | 'csv';
-export const CHAT_DOWNLOAD_FORMATS = ['png', 'csv'] as const satisfies readonly ChatDownloadFormat[];
+export type ChatDownloadFormat = 'png' | 'csv' | 'xlsx' | 'other';
+export const CHAT_DOWNLOAD_FORMATS = ['png', 'csv', 'xlsx', 'other'] as const satisfies readonly ChatDownloadFormat[];
 
-export type AnalyticsDownloadFormat = DownloadFormat | ChatDownloadFormat;
+/** A file taken out of permanent storage is recorded under its own extension. */
+export type AnalyticsDownloadFormat = DownloadFormat | ChatDownloadFormat | DocumentExtension;
 
 export const ANALYTICS_EVENT_TYPES = ['page_view', 'download', 'fork', 'favorite', 'refresh', 'view_duration'] as const;
 export const ANALYTICS_ASSET_TYPES = ['chat', 'story'] as const;
@@ -188,13 +340,14 @@ export interface GroupedChatListResponse {
 	groups: ChatGroup[];
 }
 
-export const MCP_EMBED_KINDS = ['story', 'chart'] as const satisfies readonly string[];
+export const MCP_EMBED_KINDS = ['story', 'chart', 'map'] as const satisfies readonly string[];
 
 export type McpEmbedKind = (typeof MCP_EMBED_KINDS)[number];
 
 export const MCP_EMBED_SANDBOX_HTML_FIELD = {
 	story: 'sandboxStoryHtml',
 	chart: 'sandboxChartHtml',
+	map: 'sandboxMapHtml',
 } as const satisfies Record<McpEmbedKind, string>;
 
 export type EmbedTokenPayload = {

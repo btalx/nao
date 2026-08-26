@@ -17,6 +17,10 @@ resolution-markers = [
     "python_full_version < '3.11'",
 ]
 
+[options]
+exclude-newer = "2026-08-10T11:52:08.5784Z"
+exclude-newer-span = "P2D"
+
 [[package]]
 name = "aiobotocore"
 version = "3.3.0"
@@ -2239,6 +2243,19 @@ wheels = [
 ]
 
 [[package]]
+name = "markdownify"
+version = "1.2.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/92/ab/d1297139c0e2ceb151ae564c8c4f57ac0155d8f1f8b4cbd5d6523c82ea36/markdownify-1.2.3.tar.gz", hash = "sha256:1a176f05522c8a2cb1dd3ab9d307dcdadbed5c26ae717855bfc42b3b6d38d937", size = 18852, upload-time = "2026-06-30T20:27:39.06Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/10/fa543d484e8b1199243fe20eedd02cc5af050edebce98a7293a5773df592/markdownify-1.2.3-py3-none-any.whl", hash = "sha256:a189a0bedfd14009030fde5f85bb6f77c56897cb839b5c25315dd7d4e3e290ba", size = 15732, upload-time = "2026-06-30T20:27:38.094Z" },
+]
+
+[[package]]
 name = "markupsafe"
 version = "3.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2615,6 +2632,7 @@ all = [
     { name = "google-genai" },
     { name = "ibis-framework", extra = ["athena", "bigquery", "clickhouse", "databricks", "duckdb", "mssql", "mysql", "postgres", "snowflake", "trino"] },
     { name = "kubernetes" },
+    { name = "markdownify" },
     { name = "mistralai" },
     { name = "mysql-connector-python" },
     { name = "notion-client" },
@@ -2660,6 +2678,9 @@ bigquery = [
 clickhouse = [
     { name = "clickhouse-driver" },
     { name = "ibis-framework", extra = ["clickhouse"] },
+]
+confluence = [
+    { name = "markdownify" },
 ]
 databricks = [
     { name = "certifi" },
@@ -2758,13 +2779,14 @@ requires-dist = [
     { name = "ibis-framework", extras = ["trino"], marker = "extra == 'trino'", specifier = ">=9.0.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "kubernetes", marker = "extra == 'k8s-secrets'", specifier = ">=29.0.0" },
+    { name = "markdownify", marker = "extra == 'confluence'", specifier = ">=0.13.0,<2" },
     { name = "mistralai", marker = "extra == 'mistral'", specifier = ">=1.11.1,<2.0.0" },
     { name = "mysql-connector-python", marker = "extra == 'starrocks'", specifier = "==9.5.0" },
-    { name = "nao-core", extras = ["all-databases", "all-llms", "notion", "aws-secrets", "k8s-secrets"], marker = "extra == 'all'" },
+    { name = "nao-core", extras = ["all-databases", "all-llms", "notion", "confluence", "aws-secrets", "k8s-secrets"], marker = "extra == 'all'" },
     { name = "nao-core", extras = ["openai", "anthropic", "mistral", "gemini", "ollama"], marker = "extra == 'all-llms'" },
     { name = "nao-core", extras = ["postgres", "bigquery", "snowflake", "duckdb", "clickhouse", "databricks", "mysql", "mssql", "athena", "trino", "redshift", "fabric", "starrocks"], marker = "extra == 'all-databases'" },
-    { name = "notion-client", marker = "extra == 'notion'", specifier = ">=2.7.0" },
-    { name = "notion2md", marker = "extra == 'notion'", specifier = ">=2.9.0" },
+    { name = "notion-client", marker = "extra == 'notion'", specifier = ">=3.1.0,<4" },
+    { name = "notion2md", marker = "extra == 'notion'", specifier = ">=2.9.0,<3" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "ollama", marker = "extra == 'ollama'", specifier = ">=0.4.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0.0" },
@@ -2786,7 +2808,7 @@ requires-dist = [
     { name = "sshtunnel", marker = "extra == 'redshift'", specifier = ">=0.4.0" },
     { name = "uvicorn", specifier = ">=0.40.0" },
 ]
-provides-extras = ["postgres", "bigquery", "snowflake", "duckdb", "clickhouse", "databricks", "mysql", "mssql", "athena", "trino", "redshift", "fabric", "starrocks", "openai", "anthropic", "mistral", "gemini", "ollama", "notion", "aws-secrets", "k8s-secrets", "all-databases", "all-llms", "all", "dev"]
+provides-extras = ["postgres", "bigquery", "snowflake", "duckdb", "clickhouse", "databricks", "mysql", "mssql", "athena", "trino", "redshift", "fabric", "starrocks", "openai", "anthropic", "mistral", "gemini", "ollama", "notion", "confluence", "aws-secrets", "k8s-secrets", "all-databases", "all-llms", "all", "dev"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2797,14 +2819,14 @@ dev = [
 
 [[package]]
 name = "notion-client"
-version = "3.0.0"
+version = "3.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a5/39/60afcbc0148c3dafaaefe851ae3f058077db49d66288dfb218a11a57b997/notion_client-3.0.0.tar.gz", hash = "sha256:05c4d2b4fa3491dc0de21c9c826277202ea8b8714077ee7f51a6e1a09ab23d0f", size = 31357, upload-time = "2026-02-16T11:15:48.024Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c0/e3/4ac01384e86e2c381c21b87a0fefcdfe6d65577ae3153fad27e7e96c5d9c/notion_client-3.1.0.tar.gz", hash = "sha256:516e31326f855ec34559289b57be4e27ad656062f51f594c8f4ee3a608ee333d", size = 38781, upload-time = "2026-05-12T08:54:44.363Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/aa/ce/6b03f9aedd2edfcc28e23ced5c2582d543f6ddbb2be5c570533f02890b27/notion_client-3.0.0-py2.py3-none-any.whl", hash = "sha256:177fc3d2ace7e8ef69cf96f46269e8a66071c2c7c526194bf06ce7925853e759", size = 18746, upload-time = "2026-02-16T11:15:46.602Z" },
+    { url = "https://files.pythonhosted.org/packages/08/08/12645b24044301cb0d7908ec068c55c0d5724f39372891a1a27d630fdf50/notion_client-3.1.0-py2.py3-none-any.whl", hash = "sha256:7e3935f4dbc11231d8ad1fe404112e278501520342eaa35f86456f0df44a8aca", size = 23092, upload-time = "2026-05-12T08:54:43.135Z" },
 ]
 
 [[package]]

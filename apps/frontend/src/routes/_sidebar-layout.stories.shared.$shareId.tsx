@@ -1,11 +1,10 @@
-import { splitCodeIntoSegments } from '@nao/shared/story-segments';
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import type { ParsedChartBlock, ParsedTableBlock } from '@nao/shared/story-segments';
+import type { ParsedChartBlock, ParsedMapBlock, ParsedTableBlock } from '@nao/shared/story-segments';
 
 import type { QueryDataMap } from '@/components/story-embeds';
-import type { StoryPageHeaderProps } from '@/components/story-page-header';
+import type { StoryPageHeaderProps, StoryRefreshFailure } from '@/components/story-page-header';
 import { ForkBubble } from '@/components/highlight-bubble';
 import { SelectionChatPanel } from '@/components/selection-chat-panel';
 import { SidePanel } from '@/components/side-panel/side-panel';
@@ -15,8 +14,9 @@ import { ShareStoryDialog } from '@/components/share-dialog.story';
 import { AssetAnalyticsDialog } from '@/components/asset-analytics-dialog';
 import { StoryPageBody } from '@/components/story-page-body';
 import { StoryPageHeader } from '@/components/story-page-header';
-import { StoryChartEmbed, StoryTableEmbed } from '@/components/story-embeds';
-import { SegmentList } from '@/components/story-rendering';
+import { StoryRouteError } from '@/components/story-access-error';
+import { StoryChartEmbed, StoryMapEmbed, StoryTableEmbed } from '@/components/story-embeds';
+import { StoryTabbedContent } from '@/components/story-tabbed-content';
 import { Spinner } from '@/components/ui/spinner';
 import { SidePanelProvider } from '@/contexts/side-panel';
 import { SelectionProvider } from '@/contexts/text-selection';
@@ -28,6 +28,7 @@ import { trpc } from '@/main';
 
 export const Route = createFileRoute('/_sidebar-layout/stories/shared/$shareId')({
 	component: SharedStoryPage,
+	errorComponent: StoryRouteError,
 });
 
 function SharedStoryPage() {
@@ -46,7 +47,7 @@ function SharedStoryPage() {
 
 	const refreshMutation = useMutation(
 		trpc.storyShare.refreshData.mutationOptions({
-			onSuccess: () => {
+			onSettled: () => {
 				queryClient.invalidateQueries({ queryKey: trpc.storyShare.get.queryKey({ shareId }) });
 			},
 		}),
@@ -97,6 +98,9 @@ function SharedStoryPage() {
 				storyId={story.storyId}
 				chatId={story.chatId}
 				storySlug={story.slug}
+				shareId={shareId}
+				cachedAt={story.cachedAt}
+				lastRefreshFailure={story.lastRefreshFailure}
 				onOpenChat={() =>
 					navigate({
 						to: '/$chatId',
@@ -132,6 +136,8 @@ function SharedStoryPage() {
 					story.isLive
 						? {
 								isLive: true,
+								cachedAt: story.cachedAt,
+								lastRefreshFailure: story.lastRefreshFailure,
 								isRefreshing: refreshMutation.isPending,
 								onRefresh: () => refreshMutation.mutate({ shareId }),
 							}
@@ -145,6 +151,9 @@ function SharedStoryPage() {
 		<SidePanelProvider
 			isVisible={sidePanel.isVisible}
 			currentStorySlug={sidePanel.currentStorySlug}
+			setCurrentStorySlug={sidePanel.setCurrentStorySlug}
+			currentStoryTabIndex={sidePanel.currentStoryTabIndex}
+			setCurrentStoryTabIndex={sidePanel.setCurrentStoryTabIndex}
 			chatId={story.chatId}
 			shareId={shareId}
 			shareType='story'
@@ -169,7 +178,11 @@ function SharedStoryPage() {
 										code={editor.code}
 										queryData={story.queryData as QueryDataMap | null}
 										chatId={story.chatId!}
+										shareId={shareId}
 										cacheSchedule={story.cacheSchedule}
+										filtersEnabled={
+											!isOwner || (editor.versionNav.isViewingLatest && !editor.isCodeDirty)
+										}
 									/>
 								}
 							/>
@@ -198,6 +211,9 @@ interface SharedStoryOwnerHeaderProps {
 	storyId: string | null;
 	chatId: string;
 	storySlug: string;
+	shareId: string;
+	cachedAt?: string | Date | null;
+	lastRefreshFailure?: StoryRefreshFailure | null;
 	onOpenChat: () => void;
 	viewModeControls: StoryPageHeaderProps['viewModeControls'];
 	versionControls: StoryPageHeaderProps['versionControls'];
@@ -209,6 +225,9 @@ function SharedStoryOwnerHeader({
 	storyId,
 	chatId,
 	storySlug,
+	shareId,
+	cachedAt,
+	lastRefreshFailure,
 	onOpenChat,
 	viewModeControls,
 	versionControls,
@@ -226,7 +245,7 @@ function SharedStoryOwnerHeader({
 		isRefreshing,
 		handleSaveSettings,
 		handleRefreshData,
-	} = useStoryViewerLiveSettings({ chatId, storySlug });
+	} = useStoryViewerLiveSettings({ chatId, storySlug, shareId });
 
 	return (
 		<>
@@ -236,6 +255,8 @@ function SharedStoryOwnerHeader({
 				onOpenChat={onOpenChat}
 				live={{
 					isLive,
+					cachedAt,
+					lastRefreshFailure,
 					isRefreshing,
 					onRefresh: () => handleRefreshData(),
 					onOpenSettings: () => setIsLiveSettingsOpen(true),
@@ -282,15 +303,22 @@ function SharedStoryContent({
 	code,
 	queryData,
 	chatId,
+	shareId,
 	cacheSchedule,
+	filtersEnabled,
 }: {
 	code: string;
 	queryData: QueryDataMap | null;
 	chatId: string;
+	shareId: string;
 	cacheSchedule?: string | null;
+	filtersEnabled: boolean;
 }) {
-	const segments = useMemo(() => splitCodeIntoSegments(code), [code]);
 	const isNoCacheMode = cacheSchedule === 'no-cache';
+	const filterApi = useMemo(
+		() => (filtersEnabled ? { kind: 'shared' as const, shareId } : null),
+		[filtersEnabled, shareId],
+	);
 
 	const noCacheQuery = useMemo(
 		() => (isNoCacheMode ? { queryOptions: trpc.storyShare.getLiveQueryData.queryOptions, chatId } : undefined),
@@ -298,24 +326,80 @@ function SharedStoryContent({
 	);
 
 	const renderChart = useCallback(
-		(chart: ParsedChartBlock) => (
-			<StoryChartEmbed chart={chart} queryData={isNoCacheMode ? undefined : queryData} liveQuery={noCacheQuery} />
+		(
+			chart: ParsedChartBlock,
+			{
+				queryData: data,
+				hasActiveFilters,
+				isRefreshing,
+			}: {
+				queryData: QueryDataMap | null;
+				hasActiveFilters: boolean;
+				isRefreshing: boolean;
+			},
+		) => (
+			<StoryChartEmbed
+				chart={chart}
+				queryData={isNoCacheMode && !hasActiveFilters ? undefined : data}
+				liveQuery={isNoCacheMode && !hasActiveFilters ? noCacheQuery : undefined}
+				hasActiveFilters={hasActiveFilters}
+				isRefreshing={isRefreshing}
+			/>
 		),
-		[isNoCacheMode, queryData, noCacheQuery],
+		[isNoCacheMode, noCacheQuery],
 	);
 
 	const renderTable = useCallback(
-		(table: ParsedTableBlock) => (
-			<StoryTableEmbed table={table} queryData={isNoCacheMode ? undefined : queryData} liveQuery={noCacheQuery} />
+		(
+			table: ParsedTableBlock,
+			{
+				queryData: data,
+				hasActiveFilters,
+				isRefreshing,
+			}: { queryData: QueryDataMap | null; hasActiveFilters: boolean; isRefreshing: boolean },
+		) => (
+			<StoryTableEmbed
+				table={table}
+				queryData={isNoCacheMode && !hasActiveFilters ? undefined : data}
+				liveQuery={isNoCacheMode && !hasActiveFilters ? noCacheQuery : undefined}
+				hasActiveFilters={hasActiveFilters}
+				isRefreshing={isRefreshing}
+			/>
 		),
-		[isNoCacheMode, queryData, noCacheQuery],
+		[isNoCacheMode, noCacheQuery],
+	);
+
+	const renderMap = useCallback(
+		(
+			map: ParsedMapBlock,
+			{
+				queryData: data,
+				hasActiveFilters,
+				isRefreshing,
+			}: { queryData: QueryDataMap | null; hasActiveFilters: boolean; isRefreshing: boolean },
+		) => (
+			<StoryMapEmbed
+				map={map}
+				queryData={isNoCacheMode && !hasActiveFilters ? undefined : data}
+				liveQuery={isNoCacheMode && !hasActiveFilters ? noCacheQuery : undefined}
+				hasActiveFilters={hasActiveFilters}
+				isRefreshing={isRefreshing}
+				allowExpand
+			/>
+		),
+		[isNoCacheMode, noCacheQuery],
 	);
 
 	return (
-		<div className='flex-1 overflow-auto'>
-			<div className='max-w-5xl mx-auto p-4 md:p-8 flex flex-col gap-4' data-selection-container>
-				<SegmentList segments={segments} renderChart={renderChart} renderTable={renderTable} />
-			</div>
+		<div className='flex flex-1 min-h-0 flex-col' data-selection-container>
+			<StoryTabbedContent
+				code={code}
+				baselineQueryData={queryData}
+				filterApi={filterApi}
+				renderChart={renderChart}
+				renderTable={renderTable}
+				renderMap={renderMap}
+			/>
 		</div>
 	);
 }

@@ -3,7 +3,8 @@ import { createMemoryState } from '@chat-adapter/state-memory';
 import { createTeamsAdapter } from '@chat-adapter/teams';
 import { Client } from '@microsoft/microsoft-graph-client';
 import { TokenCredentialAuthenticationProvider } from '@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials';
-import { CITATION_TAG_REGEX } from '@nao/shared';
+import { stripAssistantTags } from '@nao/shared';
+import { displayChart } from '@nao/shared/tools';
 import type { LlmSelectedModel } from '@nao/shared/types';
 import { InferUIMessageChunk, readUIMessageStream } from 'ai';
 import { Card, Chat, Message, SentMessage, Thread } from 'chat';
@@ -23,11 +24,14 @@ import {
 	createCompletionCard,
 	createImageBlock,
 	createLiveToolCall,
+	createMapLinkCard,
 	createStopButtonCard,
 	createSummaryToolCalls,
 	createTextBlock,
 	EXCLUDED_TOOLS,
+	formatClarificationText,
 	formatMessagingError,
+	renderMapImage,
 } from '../utils/messaging-provider';
 import { agentService } from './agent';
 import { posthog, PostHogEvent } from './posthog';
@@ -281,6 +285,7 @@ class TeamsService {
 		const agent = await agentService.create(
 			{ ...chat, userId: ctx.user!.id, projectId: this._projectId },
 			this._modelSelection,
+			{ supportsCustomCharts: false },
 		);
 		ctx.modelId = agent.getModelId();
 		return agent.stream(chat.messages, { provider: 'teams', timezone: ctx.timezone });
@@ -291,7 +296,7 @@ class TeamsService {
 		ctx: ConversationContext,
 	): Promise<StreamState & { lastMessage: UIMessage | null }> {
 		const state: StreamState = {
-			renderedChartIds: new Set(),
+			renderedToolCallIds: new Set(),
 			sqlOutputs: new Map(),
 			lastUpdateAt: Date.now(),
 			toolGroup: new Map(),
@@ -319,12 +324,27 @@ class TeamsService {
 				this._handleSqlPart(part, state);
 			} else if (part.type === 'tool-display_chart') {
 				await this._handleChartPart(part, state, ctx);
+			} else if (part.type === 'tool-display_map') {
+				await this._handleMapPart(part, state, ctx);
+			} else if (part.type === 'tool-clarification') {
+				this._handleClarificationPart(part, ctx);
 			}
 			lastMessage = uiMessage;
 		}
 
 		await this._sendFinalText(ctx);
 		return { ...state, lastMessage };
+	}
+
+	private _handleClarificationPart(
+		part: Extract<UIMessagePart, { type: 'tool-clarification' }>,
+		ctx: ConversationContext,
+	): void {
+		if (part.state === 'input-streaming' || !part.input) {
+			return;
+		}
+		const text = formatClarificationText(part.input.question, part.input.options);
+		this._updateTextBlock(text, ctx);
 	}
 
 	private async _handleTextPart(
@@ -354,7 +374,13 @@ class TeamsService {
 		state: StreamState,
 		ctx: ConversationContext,
 	): Promise<void> {
-		if (part.state !== 'output-available' || state.renderedChartIds.has(part.toolCallId)) {
+		if (part.state !== 'output-available' || state.renderedToolCallIds.has(part.toolCallId)) {
+			return;
+		}
+		if (!part.output?.success) {
+			return;
+		}
+		if (displayChart.isTableInput(part.input)) {
 			return;
 		}
 		const sqlOutput = state.sqlOutputs.get(part.input.query_id);
@@ -368,7 +394,7 @@ class TeamsService {
 				data: sqlOutput.rows,
 				dateFormat: displaySettings.dateFormat,
 			});
-			state.renderedChartIds.add(part.toolCallId);
+			state.renderedToolCallIds.add(part.toolCallId);
 
 			const chartId = await chartImageQueries.saveChart(part.toolCallId, png.toString('base64'));
 			const imageUrl = new URL(`c/${ctx.chatId}/${chartId}.png`, this._redirectUrl).toString();
@@ -377,6 +403,62 @@ class TeamsService {
 			await ctx.convMessage?.edit(Card({ children: ctx.blocks }));
 		} catch (error) {
 			logger.error(`Chart image generation failed: ${String(error)}`, {
+				source: 'system',
+				context: { chatId: ctx.chatId, toolCallId: part.toolCallId },
+			});
+		}
+	}
+
+	private async _handleMapPart(
+		part: Extract<UIMessagePart, { type: 'tool-display_map' }>,
+		state: StreamState,
+		ctx: ConversationContext,
+	): Promise<void> {
+		if (
+			part.state !== 'output-available' ||
+			!part.output.success ||
+			state.renderedToolCallIds.has(part.toolCallId)
+		) {
+			return;
+		}
+		state.renderedToolCallIds.add(part.toolCallId);
+		const png = await renderMapImage(part, state, this._projectId, {
+			chatId: ctx.chatId,
+			toolCallId: part.toolCallId,
+		});
+		if (!png) {
+			await this._pushMapLinkCard(part, ctx);
+			return;
+		}
+		try {
+			const mapId = await chartImageQueries.saveChart(part.toolCallId, png.toString('base64'));
+			const imageUrl = new URL(`c/${ctx.chatId}/${mapId}.png`, this._redirectUrl).toString();
+			ctx.textBlockIndex = -1;
+			ctx.blocks.push(createImageBlock(imageUrl));
+			await ctx.convMessage?.edit(Card({ children: ctx.blocks }));
+		} catch (error) {
+			logger.error(`Map image rendering failed: ${String(error)}`, {
+				source: 'system',
+				context: { chatId: ctx.chatId, toolCallId: part.toolCallId },
+			});
+			await this._pushMapLinkCard(part, ctx);
+		}
+	}
+
+	private async _pushMapLinkCard(
+		part: Extract<UIMessagePart, { type: 'tool-display_map' }>,
+		ctx: ConversationContext,
+	): Promise<void> {
+		if (part.state !== 'output-available') {
+			return;
+		}
+		try {
+			const chatUrl = new URL(ctx.chatId, this._redirectUrl).toString();
+			ctx.textBlockIndex = -1;
+			ctx.blocks.push(...createMapLinkCard(part.input.title, chatUrl));
+			await ctx.convMessage?.edit(Card({ children: ctx.blocks }));
+		} catch (error) {
+			logger.error(`Map link card failed: ${String(error)}`, {
 				source: 'system',
 				context: { chatId: ctx.chatId, toolCallId: part.toolCallId },
 			});
@@ -430,7 +512,7 @@ class TeamsService {
 	}
 
 	private _updateTextBlock(text: string, ctx: ConversationContext): void {
-		const block = createTextBlock(text.replace(CITATION_TAG_REGEX, ''));
+		const block = createTextBlock(stripAssistantTags(text));
 		if (ctx.textBlockIndex === -1) {
 			ctx.textBlockIndex = ctx.blocks.length;
 			ctx.blocks.push(block);

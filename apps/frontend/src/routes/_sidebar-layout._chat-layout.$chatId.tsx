@@ -7,6 +7,7 @@ import type { SelectionData } from '@/components/highlight-bubble';
 import { NEW_CHAT_ID } from '@/lib/ai';
 import { StoryOpenButton } from '@/components/story-open-button';
 import { StoryViewer } from '@/components/side-panel/story-viewer';
+import { DEFAULT_USAGE_SEARCH } from '@/components/settings/usage-route-search';
 import { ChatInput } from '@/components/chat-input';
 import { ChatMessages } from '@/components/chat-messages/chat-messages';
 import { HighlightBubble } from '@/components/highlight-bubble';
@@ -20,6 +21,7 @@ import { useSidePanel } from '@/hooks/use-side-panel';
 import { SidePanelProvider } from '@/contexts/side-panel';
 import { EditableChatTitle } from '@/components/editable-chat-title';
 import { useChatQuery } from '@/queries/use-chat-query';
+import { useHeight } from '@/hooks/use-height';
 import { AssetAnalyticsDialog } from '@/components/asset-analytics-dialog';
 import { ShareChatDialog } from '@/components/share-dialog.chat';
 import { usePermissions } from '@/hooks/use-permissions';
@@ -29,6 +31,7 @@ import { chatPendingCitationStore } from '@/stores/chat-pending-citation';
 import { useSetChatInputCallback } from '@/contexts/set-chat-input-callback';
 import { useTrackViewDuration } from '@/hooks/use-track-view-duration';
 import { getTextOffset } from '@/lib/selection-dom.utils';
+import { isForbiddenError } from '@/lib/trpc-error';
 
 export const Route = createFileRoute('/_sidebar-layout/_chat-layout/$chatId')({
 	component: RouteComponent,
@@ -66,7 +69,12 @@ function ChatPage() {
 
 	useEffect(() => {
 		if (shouldRedirectToReplay) {
-			router.navigate({ to: '/settings/chats-replay', search: { chatId }, replace: true });
+			router.navigate({
+				to: '/settings/usage/replay/$chatId',
+				params: { chatId },
+				search: DEFAULT_USAGE_SEARCH,
+				replace: true,
+			});
 		}
 	}, [shouldRedirectToReplay, chatId, router]);
 
@@ -81,6 +89,8 @@ function ChatPage() {
 
 	const containerRef = useRef<HTMLDivElement>(null);
 	const sidePanelRef = useRef<HTMLDivElement>(null);
+	const inputAreaRef = useRef<HTMLDivElement>(null);
+	const inputAreaHeight = useHeight(inputAreaRef);
 
 	const sidePanel = useSidePanel({ containerRef, sidePanelRef });
 	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
@@ -133,13 +143,19 @@ function ChatPage() {
 		<SidePanelProvider
 			isVisible={sidePanel.isVisible}
 			currentStorySlug={sidePanel.currentStorySlug}
+			setCurrentStorySlug={sidePanel.setCurrentStorySlug}
+			currentStoryTabIndex={sidePanel.currentStoryTabIndex}
+			setCurrentStoryTabIndex={sidePanel.setCurrentStoryTabIndex}
 			chatId={chatId}
 			open={sidePanel.open}
 			close={sidePanel.close}
 		>
-			<SelectionProvider key={chatId}>
+			<SelectionProvider resetKey={chatId}>
 				<div className='flex-1 flex min-w-0 bg-background' ref={containerRef}>
-					<div className='flex flex-col h-full flex-1 min-w-0 overflow-hidden justify-center relative'>
+					<div
+						className='flex flex-col h-full flex-1 min-w-0 overflow-hidden justify-center relative'
+						style={{ '--chat-input-height': `${inputAreaHeight}px` } as React.CSSProperties}
+					>
 						<MobileHeader chatId={chatId} title={title} automationId={automationId} />
 
 						<div className='group/header absolute flex items-center justify-between top-3 inset-x-4 z-10 max-md:hidden'>
@@ -243,8 +259,14 @@ function ChatPage() {
 								<ChatMessages />
 							</>
 						)}
-
-						<ChatInput />
+						<div className='pointer-events-none absolute left-0 right-4 bottom-0 z-10 pt-8'>
+							<div
+								ref={inputAreaRef}
+								className='pointer-events-auto bg-gradient-to-t from-background via-background via-70% to-transparent'
+							>
+								<ChatInput />
+							</div>
+						</div>
 					</div>
 
 					{sidePanel.content && (
@@ -311,14 +333,6 @@ function resolveStoryCitationMeta(
 	}
 
 	return { storySlug: currentStorySlug, start, end };
-}
-
-function isForbiddenError(error: unknown): boolean {
-	if (typeof error !== 'object' || error === null || !('data' in error)) {
-		return false;
-	}
-	const { data } = error as { data?: { code?: string } | null };
-	return data?.code === 'FORBIDDEN';
 }
 
 function buildHeaderCitation(meta: ForkMetadata | undefined): { citation: string; text: string } | null {

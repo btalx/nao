@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { getGridTemplateColumns } from '@nao/shared/story-segments';
 import type { ReactNode } from 'react';
 import type { StorySummary, SummarySegment } from '@nao/shared/types';
 import { cn } from '@/lib/utils';
@@ -150,8 +151,10 @@ function SegmentSilhouette({ segment }: { segment: SummarySegment }) {
 			return <ChartSilhouette chartType={segment.chartType} kpiCount={segment.kpiCount} />;
 		case 'table':
 			return <TableSilhouette />;
+		case 'map':
+			return <MapSilhouette />;
 		case 'grid':
-			return <GridSilhouette cols={segment.cols} children={segment.children} />;
+			return <GridSilhouette cols={segment.cols} widths={segment.widths} children={segment.children} />;
 	}
 }
 
@@ -313,11 +316,73 @@ function TableSilhouette() {
 	);
 }
 
-function GridSilhouette({ cols, children }: { cols: number; children: SummarySegment[] }) {
-	const gridCols = Math.min(cols, 3);
+function MapSilhouette() {
 	return (
-		<div className='grid gap-[5px]' style={{ gridTemplateColumns: `repeat(${gridCols}, 1fr)` }}>
-			{children.slice(0, gridCols * 2).map((child, i) => (
+		<div className='rounded-[4px] overflow-hidden'>
+			<svg viewBox='0 0 60 36' width='100%' height='100%' className={cn('block max-h-[40px]', CHART_COLOR)}>
+				<rect x='0' y='0' width='60' height='36' rx='4px' fill='currentColor' opacity={0.06} />
+				<path
+					d='M0 11L16 6L30 11L44 5L60 10'
+					fill='none'
+					stroke='var(--foreground)'
+					strokeOpacity={0.1}
+					strokeWidth='1'
+				/>
+				<path
+					d='M0 24L14 20L28 25L42 19L60 24'
+					fill='none'
+					stroke='var(--foreground)'
+					strokeOpacity={0.1}
+					strokeWidth='1'
+				/>
+				<path
+					d='M20 0L24 12L18 22L23 36'
+					fill='none'
+					stroke='var(--foreground)'
+					strokeOpacity={0.1}
+					strokeWidth='1'
+				/>
+				<path
+					d='M42 0L38 14L44 24L40 36'
+					fill='none'
+					stroke='var(--foreground)'
+					strokeOpacity={0.1}
+					strokeWidth='1'
+				/>
+				<MapPin cx={19} cy={14} />
+				<MapPin cx={38} cy={22} />
+				<MapPin cx={47} cy={11} />
+			</svg>
+		</div>
+	);
+}
+
+function MapPin({ cx, cy }: { cx: number; cy: number }) {
+	return (
+		<path
+			d={`M${cx} ${cy - 4.2}C${cx - 1.56} ${cy - 4.2} ${cx - 2.64} ${cy - 3.12} ${cx - 2.64} ${cy - 1.68}C${cx - 2.64} ${cy - 0.12} ${cx} ${cy + 1.8} ${cx} ${cy + 1.8}C${cx} ${cy + 1.8} ${cx + 2.64} ${cy - 0.12} ${cx + 2.64} ${cy - 1.68}C${cx + 2.64} ${cy - 3.12} ${cx + 1.56} ${cy - 4.2} ${cx} ${cy - 4.2}Z`}
+			fill='currentColor'
+			opacity={0.85}
+		/>
+	);
+}
+
+function GridSilhouette({
+	cols,
+	widths,
+	children,
+}: {
+	cols: number;
+	widths: number[] | null;
+	children: SummarySegment[];
+}) {
+	const gridCols = Math.min(cols, 3);
+	const gridTemplateColumns = widths !== null ? getGridTemplateColumns(widths) : `repeat(${gridCols}, 1fr)`;
+	const visibleChildren = widths !== null ? children.slice(0, widths.length * 2) : children.slice(0, gridCols * 2);
+
+	return (
+		<div className='grid gap-[5px]' style={{ gridTemplateColumns }}>
+			{visibleChildren.map((child, i) => (
 				<SegmentSilhouette key={i} segment={child} />
 			))}
 		</div>

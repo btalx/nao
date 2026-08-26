@@ -1,8 +1,12 @@
+import { stripSqlFilterBlocks } from '@nao/shared/sql-template';
+import { TAG_ATTRS } from '@nao/shared/story-segments';
 import { generateText, Output } from 'ai';
 import { CronExpressionParser } from 'cron-parser';
 import { z } from 'zod';
 
+import { llmTelemetry } from '../agents/telemetry';
 import { LiveStoryRefreshPrompt } from '../components/ai/live-story-refresh-prompt';
+import type { DBStoryDataCache } from '../db/abstractSchema';
 import { env } from '../env';
 import { renderToMarkdown } from '../lib/markdown';
 import * as chatQueries from '../queries/chat.queries';
@@ -10,9 +14,18 @@ import * as projectQueries from '../queries/project.queries';
 import * as llmConfigQueries from '../queries/project-llm-config.queries';
 import { getQueryDataFromCode } from '../queries/shared-story.queries';
 import * as storyQueries from '../queries/story.queries';
-import { getDefaultModelId, resolveProviderModel } from '../utils/llm';
+import { convertToTokenUsage } from '../utils/ai';
+import { getDefaultModelId, resolveDefaultModelSelection, resolveProviderModel } from '../utils/llm';
+import { scheduleSaveLlmInferenceRecord } from '../utils/schedule-task';
+import { backfillMissingQueryData, findMissingQueryIds } from '../utils/story-query-data';
 import { MAX_OUTPUT_TOKENS } from './agent';
 const MAX_RENDERED_ROWS = 60;
+
+interface StoryRefreshTarget {
+	projectId: string;
+	userId: string;
+	chatId: string;
+}
 
 export async function executeLiveQuery(
 	chatId: string,
@@ -34,7 +47,7 @@ export async function executeLiveQuery(
 	}
 
 	const envVars = await projectQueries.getEnvVars(projectId);
-	return executeRawSql(query.sqlQuery, project.path, query.databaseId, envVars);
+	return executeRawSql(stripSqlFilterBlocks(query.sqlQuery), project.path, query.databaseId, envVars);
 }
 
 export interface RefreshResult {
@@ -52,12 +65,12 @@ export async function refreshStoryData(chatId: string, slug: string): Promise<Re
 		return { queryData: {} };
 	}
 
-	const projectId = await chatQueries.getChatProjectId(chatId);
-	if (!projectId) {
+	const chat = await chatQueries.getChatInfo(chatId);
+	if (!chat) {
 		throw new Error('Chat project not found');
 	}
 
-	const project = await projectQueries.retrieveProjectById(projectId);
+	const project = await projectQueries.retrieveProjectById(chat.projectId);
 	if (!project.path) {
 		throw new Error('Project path not configured');
 	}
@@ -66,14 +79,24 @@ export async function refreshStoryData(chatId: string, slug: string): Promise<Re
 
 	await Promise.all(
 		Object.entries(sqlQueries).map(async ([queryId, { sqlQuery, databaseId }]) => {
-			const projectEnvVars = await projectQueries.getEnvVars(projectId);
-			const result = await executeRawSql(sqlQuery, project.path!, databaseId, projectEnvVars);
+			const projectEnvVars = await projectQueries.getEnvVars(chat.projectId);
+			const result = await executeRawSql(
+				stripSqlFilterBlocks(sqlQuery),
+				project.path!,
+				databaseId,
+				projectEnvVars,
+			);
 			queryData[queryId] = result;
 		}),
 	);
 
 	if (version.isLiveTextDynamic) {
-		const newCode = await generateDynamicStoryCode(projectId, version.title, version.code, queryData);
+		const newCode = await generateDynamicStoryCode(
+			{ projectId: chat.projectId, userId: chat.userId, chatId },
+			version.title,
+			version.code,
+			queryData,
+		);
 		if (newCode) {
 			await storyQueries.updateLatestVersionCode(chatId, slug, newCode);
 		}
@@ -103,7 +126,7 @@ export async function getStoryQueryData(
 	const cache = await storyQueries.getStoryDataCacheByChatAndSlug(chatId, slug);
 
 	if (cache && !isCacheExpired(cache.cachedAt, cacheSchedule)) {
-		return { queryData: cache.queryData, cachedAt: cache.cachedAt };
+		return resolveFromCache(chatId, code, cache);
 	}
 
 	try {
@@ -114,13 +137,20 @@ export async function getStoryQueryData(
 		};
 	} catch {
 		if (cache) {
-			return { queryData: cache.queryData, cachedAt: cache.cachedAt };
+			return resolveFromCache(chatId, code, cache);
 		}
 		return { queryData: await getQueryDataFromCode(chatId, code), cachedAt: null };
 	}
 }
 
-async function executeRawSql(
+async function resolveFromCache(chatId: string, code: string, cache: DBStoryDataCache): Promise<StoryQueryDataResult> {
+	const missing = findMissingQueryIds(code, cache.queryData);
+	const queryData =
+		missing.length > 0 ? await backfillMissingQueryData(code, cache.queryData, { chatId }) : cache.queryData;
+	return { queryData, cachedAt: cache.cachedAt };
+}
+
+export async function executeRawSql(
 	sqlQuery: string,
 	projectFolder: string,
 	databaseId?: string,
@@ -161,17 +191,20 @@ function isCacheExpired(cachedAt: Date, cacheSchedule: string | null): boolean {
 }
 
 async function generateDynamicStoryCode(
-	projectId: string,
+	target: StoryRefreshTarget,
 	title: string,
 	originalCode: string,
 	queryData: Record<string, { data: unknown[]; columns: string[] }>,
 ): Promise<string | null> {
-	const provider = await llmConfigQueries.getProjectModelProvider(projectId);
+	const { projectId } = target;
+	const pinned = await resolveDefaultModelSelection(projectId, 'live_story');
+	const provider = pinned?.provider ?? (await llmConfigQueries.getProjectModelProvider(projectId));
 	if (!provider) {
 		return null;
 	}
 
-	const model = await resolveProviderModel(projectId, provider, getDefaultModelId(provider));
+	const modelId = pinned?.modelId ?? getDefaultModelId(provider);
+	const model = await resolveProviderModel(projectId, provider, modelId);
 	if (!model) {
 		return null;
 	}
@@ -180,7 +213,7 @@ async function generateDynamicStoryCode(
 		const querySummaries = buildQueryDataSummary(queryData);
 		const systemPrompt = renderToMarkdown(LiveStoryRefreshPrompt({ title, originalCode, querySummaries }));
 
-		const { output } = await generateText({
+		const { output, usage } = await generateText({
 			...model,
 			system: systemPrompt,
 			messages: [{ role: 'user', content: 'Refresh the story narrative with the latest query results.' }],
@@ -190,6 +223,17 @@ async function generateDynamicStoryCode(
 				}),
 			}),
 			maxOutputTokens: MAX_OUTPUT_TOKENS,
+			experimental_telemetry: llmTelemetry('nao-live-story', { projectId, tags: [provider] }),
+		});
+
+		scheduleSaveLlmInferenceRecord({
+			type: 'live_story_refresh',
+			projectId,
+			userId: target.userId,
+			chatId: target.chatId,
+			llmProvider: provider,
+			llmModelId: model.model.modelId,
+			...convertToTokenUsage(usage),
 		});
 
 		const candidate = stripCodeFence(output.code.trim());
@@ -198,8 +242,8 @@ async function generateDynamicStoryCode(
 		}
 
 		return candidate;
-	} catch {
-		return null;
+	} catch (error) {
+		throw error instanceof Error ? error : new Error(String(error));
 	}
 }
 
@@ -293,7 +337,11 @@ function preservesStoryStructure(originalCode: string, candidateCode: string): b
 }
 
 function extractStructureTokens(code: string): string[] {
-	return code.match(/<grid\s+[^>]*>|<\/grid>|<chart\s+[^/>]*\/?>|<table\s+[^/>]*\/?>/g) ?? [];
+	const tokenRegex = new RegExp(
+		String.raw`<grid\s+${TAG_ATTRS}>|<\/grid>|<chart\s+${TAG_ATTRS}\/?>|<table\s+${TAG_ATTRS}\/?>|<filter\s+${TAG_ATTRS}\/?>`,
+		'g',
+	);
+	return code.match(tokenRegex) ?? [];
 }
 
 function extractHeadingTokens(code: string): string[] {

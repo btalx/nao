@@ -3,6 +3,7 @@ import { StoryToolCall } from './story';
 import { ClarificationToolCall } from './clarification';
 import { DefaultToolCall } from './default';
 import { DisplayChartToolCall } from './display-chart';
+import { DisplayMapToolCall } from './display-map';
 import { ExecutePythonToolCall } from './execute-python';
 import { ExecuteSandboxedCodeToolCall } from './execute-sandboxed-code';
 import { ExecuteSqlToolCall } from './execute-sql';
@@ -16,6 +17,7 @@ import { RecordRecommendationToolCall } from './record-recommendation';
 import { SearchToolCall } from './search';
 import { WebFetchToolCall } from './web-fetch';
 import { WebSearchToolCall } from './web-search';
+import { WriteToolCall } from './write';
 import type { StaticToolName, UIToolPart } from '@nao/backend/chat';
 import { getToolName, isToolSettled } from '@/lib/ai';
 import { ToolCallProvider } from '@/contexts/tool-call';
@@ -31,6 +33,7 @@ const toolComponents: Partial<{
 	story: StoryToolCall,
 	clarification: ClarificationToolCall,
 	display_chart: DisplayChartToolCall,
+	display_map: DisplayMapToolCall,
 	execute_python: ExecutePythonToolCall,
 	execute_sandboxed_code: ExecuteSandboxedCodeToolCall,
 	execute_sql: ExecuteSqlToolCall,
@@ -39,6 +42,7 @@ const toolComponents: Partial<{
 	read: ReadToolCall,
 	read_query_result: ReadQueryResultToolCall,
 	search: SearchToolCall,
+	write: WriteToolCall,
 };
 
 export const dynamicToolComponents = {
@@ -48,6 +52,7 @@ export const dynamicToolComponents = {
 	query_app_db: QueryAppDbToolCall,
 	record_recommendation: RecordRecommendationToolCall,
 	mcp_call: McpToolCall,
+	mcp_connect: McpToolCall,
 } satisfies Record<string, React.ComponentType<ToolCallComponentProps>>;
 
 export type DynamicToolName = keyof typeof dynamicToolComponents;
@@ -55,7 +60,9 @@ export type DynamicToolName = keyof typeof dynamicToolComponents;
 export const ToolCall = memo(({ toolPart }: { toolPart: UIToolPart }) => {
 	const { isSettled: isMessageSettled } = useAssistantMessage();
 
-	if (toolPart.type === 'tool-suggest_follow_ups') {
+	// Neither is the agent talking to the user: follow-ups render in their own strip, and a
+	// built-in skill is internal guidance nobody should have to see the agent consult.
+	if (toolPart.type === 'tool-suggest_follow_ups' || toolPart.type === 'tool-load_skill') {
 		return null;
 	}
 

@@ -1,4 +1,4 @@
-import type { displayChart } from '@nao/shared/tools';
+import type { displayChart, displayMap } from '@nao/shared/tools';
 
 import { AgentSettings } from './agent-settings';
 
@@ -8,7 +8,8 @@ export interface QueryResult {
 }
 
 export interface GeneratedArtifacts {
-	charts: displayChart.Input[];
+	charts: (displayChart.BuiltinChartInput | displayChart.KpiCardInput)[];
+	maps: displayMap.Input[];
 	stories: { id: string; title: string }[];
 }
 
@@ -17,6 +18,7 @@ export interface ToolContext {
 	chatId: string;
 	userId: string;
 	projectId: string;
+	supportsCustomCharts: boolean;
 	agentSettings: AgentSettings | null;
 	envVars: Record<string, string>;
 	/**

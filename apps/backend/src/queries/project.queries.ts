@@ -1,6 +1,7 @@
+import type { BackgroundModelSettings, CustomBoundarySet, MapSettings } from '@nao/shared';
 import { DEFAULT_DATE_FORMAT_SETTINGS, type DisplaySettings } from '@nao/shared/date';
 import type { UpdatedAtFilter, UserRole } from '@nao/shared/types';
-import { and, asc, desc, eq, gt, gte, lte, or, type SQL, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, isNotNull, lte, or, type SQL, sql } from 'drizzle-orm';
 
 import type { AgentSettings, DBProject, DBProjectMember, NewProject, NewProjectMember } from '../db/abstractSchema';
 import s from '../db/abstractSchema';
@@ -9,6 +10,7 @@ import dbConfig, { Dialect } from '../db/dbConfig';
 import { env, isCloud } from '../env';
 import type { ListProjectChatsResponse, ProjectChatsFacetKey, UserWithRole } from '../types/project';
 import { HandlerError } from '../utils/error';
+import { createCostLookup, TOTAL_COST_EXPR } from './usage.queries';
 
 export interface UserProjectWithRole {
 	project: DBProject;
@@ -85,6 +87,21 @@ export const updateProjectMemberRole = async (projectId: string, userId: string,
 		.execute();
 };
 
+export const listProjectMembershipsForUser = async (
+	userId: string,
+): Promise<Array<{ projectId: string; projectPath: string | null; role: UserRole }>> => {
+	return db
+		.select({
+			projectId: s.projectMember.projectId,
+			projectPath: s.project.path,
+			role: s.projectMember.role,
+		})
+		.from(s.projectMember)
+		.innerJoin(s.project, eq(s.project.id, s.projectMember.projectId))
+		.where(eq(s.projectMember.userId, userId))
+		.execute();
+};
+
 export const listUserProjectsWithRoles = async (userId: string): Promise<UserProjectWithRole[]> => {
 	const results = await db
 		.select({
@@ -126,7 +143,7 @@ export const getUserRoleInProject = async (projectId: string, userId: string): P
 	return orgMember ? orgMember.role : null;
 };
 
-export const listAllUsersWithRoles = async (projectId: string): Promise<UserWithRole[]> => {
+export const listProjectMembersWithRoles = async (projectId: string): Promise<UserWithRole[]> => {
 	const results = await db
 		.select({
 			id: s.user.id,
@@ -138,6 +155,25 @@ export const listAllUsersWithRoles = async (projectId: string): Promise<UserWith
 		.from(s.user)
 		.innerJoin(s.projectMember, eq(s.projectMember.userId, s.user.id))
 		.where(eq(s.projectMember.projectId, projectId))
+		.execute();
+
+	return results;
+};
+
+export const listUsersWithProjectAccess = async (projectId: string): Promise<UserWithRole[]> => {
+	const project = await getProjectById(projectId);
+	const results = await db
+		.select({
+			id: s.user.id,
+			name: s.user.name,
+			email: s.user.email,
+			role: sql<UserRole>`coalesce(${s.projectMember.role}, ${s.orgMember.role})`,
+			messagingProviderCode: s.user.messagingProviderCode,
+		})
+		.from(s.user)
+		.leftJoin(s.projectMember, and(eq(s.projectMember.userId, s.user.id), eq(s.projectMember.projectId, projectId)))
+		.leftJoin(s.orgMember, and(eq(s.orgMember.userId, s.user.id), eq(s.orgMember.orgId, project?.orgId ?? '')))
+		.where(or(isNotNull(s.projectMember.userId), isNotNull(s.orgMember.userId)))
 		.execute();
 
 	return results;
@@ -178,7 +214,7 @@ export const getProjectByUserId = async (
 };
 
 export const checkProjectHasMoreThanOneAdmin = async (projectId: string): Promise<boolean> => {
-	const userWithRoles = await listAllUsersWithRoles(projectId);
+	const userWithRoles = await listProjectMembersWithRoles(projectId);
 	const nbAdmin = userWithRoles.filter((u) => u.role === 'admin').length;
 	return nbAdmin > 1;
 };
@@ -200,6 +236,10 @@ export const updateAgentSettings = async (projectId: string, settings: AgentSett
 		webSearch: {
 			...current.webSearch,
 			...settings.webSearch,
+		},
+		pythonExecution: {
+			...current.pythonExecution,
+			...settings.pythonExecution,
 		},
 	};
 	await db.update(s.project).set({ agentSettings: next }).where(eq(s.project.id, projectId)).execute();
@@ -266,6 +306,77 @@ export const updateDisplaySettings = async (projectId: string, settings: Display
 	await db.update(s.project).set({ displaySettings: next }).where(eq(s.project.id, projectId)).execute();
 	return next;
 };
+
+export const getDefaultModelSettings = async (projectId: string): Promise<BackgroundModelSettings | null> => {
+	const project = await getProjectById(projectId);
+	return project?.defaultModels ?? null;
+};
+
+export const updateDefaultModelSettings = async (
+	projectId: string,
+	settings: BackgroundModelSettings,
+): Promise<BackgroundModelSettings> => {
+	await db.update(s.project).set({ defaultModels: settings }).where(eq(s.project.id, projectId)).execute();
+	return settings;
+};
+
+export const getMapSettings = async (projectId: string): Promise<MapSettings> => {
+	const project = await getProjectById(projectId);
+	return project?.mapSettings ?? {};
+};
+
+export const getCustomBoundaries = async (projectId: string): Promise<CustomBoundarySet[]> => {
+	const settings = await getMapSettings(projectId);
+	return settings.customBoundaries ?? [];
+};
+
+export const addCustomBoundary = (projectId: string, boundary: CustomBoundarySet): Promise<CustomBoundarySet[]> =>
+	mutateCustomBoundaries(projectId, (current) => {
+		if (current.some((b) => b.key === boundary.key)) {
+			throw new Error(`A boundary set with key "${boundary.key}" already exists.`);
+		}
+		return [...current, boundary];
+	});
+
+export const updateCustomBoundary = (
+	projectId: string,
+	key: string,
+	patch: Partial<CustomBoundarySet>,
+): Promise<CustomBoundarySet[]> =>
+	mutateCustomBoundaries(projectId, (current) => {
+		if (patch.key && patch.key !== key && current.some((b) => b.key === patch.key)) {
+			throw new Error(`A boundary set with key "${patch.key}" already exists.`);
+		}
+		return current.map((b) => (b.key === key ? { ...b, ...patch } : b));
+	});
+
+export const deleteCustomBoundary = (projectId: string, key: string): Promise<CustomBoundarySet[]> =>
+	mutateCustomBoundaries(projectId, (current) => current.filter((b) => b.key !== key));
+
+const mutateCustomBoundaries = async (
+	projectId: string,
+	transform: (current: CustomBoundarySet[]) => CustomBoundarySet[],
+): Promise<CustomBoundarySet[]> =>
+	db.transaction(async (tx) => {
+		const base = tx
+			.select({ mapSettings: s.project.mapSettings })
+			.from(s.project)
+			.where(eq(s.project.id, projectId));
+		const [row] = await lockForUpdate(base).execute();
+		const settings = row?.mapSettings ?? {};
+		const next = transform(settings.customBoundaries ?? []);
+		await tx
+			.update(s.project)
+			.set({ mapSettings: { ...settings, customBoundaries: next } })
+			.where(eq(s.project.id, projectId))
+			.execute();
+		return next;
+	});
+
+const lockForUpdate = <Query extends { execute(): unknown }>(query: Query): Query =>
+	dbConfig.dialect === Dialect.Postgres ? (query as Query & Lockable<Query>).for('update') : query;
+
+type Lockable<Query> = { for(strength: 'update'): Query };
 
 export const getEnvVars = async (projectId: string): Promise<Record<string, string>> => {
 	const project = await getProjectById(projectId);
@@ -358,6 +469,26 @@ export const listProjectChats = async (
 		)
 	`;
 
+	const cacheReadTokensExpr = sql<number>`
+		(
+			select coalesce(sum(${s.chatMessage.inputCacheReadTokens}), 0)
+			from ${s.chatMessage}
+			where ${s.chatMessage.chatId} = ${s.chat.id}
+				and ${s.chatMessage.supersededAt} is null
+		)
+	`;
+
+	const costLookup = await createCostLookup(projectId);
+	const totalCostExpr = sql<number>`
+		(
+			select coalesce(sum(${TOTAL_COST_EXPR}), 0)
+			from ${s.chatMessage}
+			left join ${costLookup.table} on ${costLookup.joinCondition}
+			where ${s.chatMessage.chatId} = ${s.chat.id}
+				and ${s.chatMessage.supersededAt} is null
+		)
+	`;
+
 	const downvotesExpr = feedbackExpr('down', sql<number>`count(*)`);
 	const upvotesExpr = feedbackExpr('up', sql<number>`count(*)`);
 	const feedbackTextExpr = feedbackExpr(
@@ -369,6 +500,15 @@ export const listProjectChats = async (
 
 	const toolErrorCountExpr = countToolState('output-error');
 	const toolAvailableCountExpr = countToolState('output-available');
+	const sourceExpr = sql<string | null>`(
+		select source_message.source
+		from ${s.chatMessage} as source_message
+		where source_message.chat_id = ${s.chat.id}
+			and source_message.role = 'user'
+			and source_message.superseded_at is null
+		order by source_message.created_at asc
+		limit 1
+	)`;
 
 	const baseWhereClauses = [eq(s.chat.projectId, projectId)];
 
@@ -421,6 +561,11 @@ export const listProjectChats = async (
 			if (expr) {
 				filterWhereClauses.push(expr);
 			}
+		} else if (filter.id === 'source') {
+			const expr = or(...filter.values.map((source) => eq(sourceExpr, source)));
+			if (expr) {
+				filterWhereClauses.push(expr);
+			}
 		} else if (filter.id === 'toolState') {
 			const exprs: SQL<unknown>[] = [];
 			for (const v of filter.values) {
@@ -442,6 +587,24 @@ export const listProjectChats = async (
 			if (expr) {
 				filterWhereClauses.push(expr);
 			}
+		} else if (filter.id === 'feedback') {
+			const exprs: SQL<unknown>[] = [];
+			for (const v of filter.values) {
+				if (v === 'noVotes') {
+					const e = and(eq(upvotesExpr, 0), eq(downvotesExpr, 0));
+					if (e) {
+						exprs.push(e);
+					}
+				} else if (v === 'upvotes') {
+					exprs.push(gt(upvotesExpr, 0));
+				} else if (v === 'downvotes') {
+					exprs.push(gt(downvotesExpr, 0));
+				}
+			}
+			const expr = or(...exprs);
+			if (expr) {
+				filterWhereClauses.push(expr);
+			}
 		}
 	}
 
@@ -451,6 +614,7 @@ export const listProjectChats = async (
 		sorting,
 		numberOfMessagesExpr,
 		totalTokensExpr,
+		totalCostExpr,
 		downvotesExpr,
 		upvotesExpr,
 		toolErrorCountExpr,
@@ -467,8 +631,11 @@ export const listProjectChats = async (
 			userName: s.user.name,
 			userRole: sql<UserRole | null>`coalesce(${s.projectMember.role}, 'Former member')`.as('userRole'),
 			title: s.chat.title,
+			source: sourceExpr.as('source'),
 			numberOfMessages: numberOfMessagesExpr.as('numberOfMessages'),
 			totalTokens: totalTokensExpr.as('totalTokens'),
+			cacheReadTokens: cacheReadTokensExpr.as('cacheReadTokens'),
+			totalCost: totalCostExpr.as('totalCost'),
 			feedbackText: feedbackTextExpr.as('feedbackText'),
 			downvotes: downvotesExpr.as('downvotes'),
 			upvotes: upvotesExpr.as('upvotes'),
@@ -507,8 +674,11 @@ export const listProjectChats = async (
 			userName: row.userName,
 			userRole: row.userRole,
 			title: row.title,
+			source: row.source,
 			numberOfMessages: Number(row.numberOfMessages ?? 0),
 			totalTokens: Number(row.totalTokens ?? 0),
+			cacheReadTokens: Number(row.cacheReadTokens ?? 0),
+			totalCost: Number(row.totalCost ?? 0),
 			feedbackText: row.feedbackText ?? '',
 			downvotes: Number(row.downvotes ?? 0),
 			upvotes: Number(row.upvotes ?? 0),
@@ -541,6 +711,7 @@ function buildProjectChatsOrderBy(args: {
 	sorting: { id: string; desc?: boolean }[];
 	numberOfMessagesExpr: ReturnType<typeof sql<number>>;
 	totalTokensExpr: ReturnType<typeof sql<number>>;
+	totalCostExpr: ReturnType<typeof sql<number>>;
 	downvotesExpr: ReturnType<typeof sql<number>>;
 	upvotesExpr: ReturnType<typeof sql<number>>;
 	toolErrorCountExpr: ReturnType<typeof sql<number>>;
@@ -550,6 +721,7 @@ function buildProjectChatsOrderBy(args: {
 		sorting,
 		numberOfMessagesExpr,
 		totalTokensExpr,
+		totalCostExpr,
 		downvotesExpr,
 		upvotesExpr,
 		toolErrorCountExpr,
@@ -578,6 +750,9 @@ function buildProjectChatsOrderBy(args: {
 				break;
 			case 'totalTokens':
 				sorters.push(dir(totalTokensExpr));
+				break;
+			case 'totalCost':
+				sorters.push(dir(totalCostExpr));
 				break;
 			case 'feedback':
 				sorters.push(...buildTieredSort(dir, downvotesExpr, upvotesExpr));

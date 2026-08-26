@@ -15,6 +15,7 @@ interface UseStoryViewerVersionActionsParams {
 	isViewingLatest: boolean;
 	tiptapEditorRef: MutableRefObject<TiptapEditor | null>;
 	codeViewRef: MutableRefObject<StoryCodeViewHandle | null>;
+	getEditModeCode?: () => string | null;
 	viewMode: StoryViewMode;
 	setViewMode: (mode: StoryViewMode) => void;
 }
@@ -27,29 +28,46 @@ export const useStoryViewerVersionActions = ({
 	isViewingLatest,
 	tiptapEditorRef,
 	codeViewRef,
+	getEditModeCode,
 	viewMode,
 	setViewMode,
 }: UseStoryViewerVersionActionsParams) => {
 	const queryClient = useQueryClient();
 	const latestStoryQueryKey = trpc.story.getLatest.queryKey({ chatId, storySlug });
+	const listVersionsQueryKey = trpc.story.listVersions.queryKey({ chatId, storySlug });
 
 	const createVersionMutation = useMutation(
 		trpc.story.createVersion.mutationOptions({
 			onMutate: async (variables) => {
-				await queryClient.cancelQueries({ queryKey: latestStoryQueryKey });
-
 				const previousLatestStory = queryClient.getQueryData(latestStoryQueryKey);
+				const previousVersions = queryClient.getQueryData(listVersionsQueryKey);
 				queryClient.setQueryData(latestStoryQueryKey, (latestStory) =>
 					latestStory && typeof latestStory === 'object'
 						? { ...latestStory, code: variables.code }
 						: latestStory,
 				);
+				queryClient.setQueryData(listVersionsQueryKey, (data) => {
+					if (!data || !Array.isArray(data.versions) || data.versions.length === 0) {
+						return data;
+					}
+					const lastVersion = data.versions[data.versions.length - 1];
+					return {
+						...data,
+						versions: [...data.versions, { ...lastVersion, code: variables.code }],
+					};
+				});
 
-				return { previousLatestStory };
+				await queryClient.cancelQueries({ queryKey: latestStoryQueryKey });
+				await queryClient.cancelQueries({ queryKey: listVersionsQueryKey });
+
+				return { previousLatestStory, previousVersions };
 			},
 			onError: (_error, _variables, context) => {
 				if (context?.previousLatestStory !== undefined) {
 					queryClient.setQueryData(latestStoryQueryKey, context.previousLatestStory);
+				}
+				if (context?.previousVersions !== undefined) {
+					queryClient.setQueryData(listVersionsQueryKey, context.previousVersions);
 				}
 			},
 			onSuccess: () => {
@@ -70,11 +88,16 @@ export const useStoryViewerVersionActions = ({
 
 		let newCode: string | null = null;
 		if (viewMode === 'edit') {
-			const editor = tiptapEditorRef.current;
-			if (!editor) {
-				return;
+			const override = getEditModeCode?.();
+			if (override != null) {
+				newCode = override;
+			} else {
+				const editor = tiptapEditorRef.current;
+				if (!editor) {
+					return;
+				}
+				newCode = getEditorMarkdown(editor);
 			}
-			newCode = getEditorMarkdown(editor);
 		} else if (viewMode === 'code') {
 			const codeView = codeViewRef.current;
 			if (!codeView) {
@@ -111,6 +134,7 @@ export const useStoryViewerVersionActions = ({
 		currentVersionCode,
 		tiptapEditorRef,
 		codeViewRef,
+		getEditModeCode,
 		viewMode,
 		createVersionMutation,
 		setViewMode,
@@ -134,5 +158,6 @@ export const useStoryViewerVersionActions = ({
 	return {
 		handleSave,
 		handleRestore,
+		isSaving: createVersionMutation.isPending,
 	};
 };
