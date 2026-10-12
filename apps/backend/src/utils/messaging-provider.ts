@@ -1,7 +1,7 @@
 import { cardToBlockKit } from '@chat-adapter/slack';
 import { pluralize, stripAssistantTags, TOOL_LABELS } from '@nao/shared';
 import type { CardChild, CardElement, ModalElement, PostableMarkdown } from 'chat';
-import { Actions, Button, Card, CardText, Image, LinkButton, Table } from 'chat';
+import { Actions, Button, Card, CardText, Image, LinkButton } from 'chat';
 
 import { generateMapImage } from '../components/generate-map';
 import * as projectQueries from '../queries/project.queries';
@@ -144,13 +144,11 @@ export type TruncationNotice = { kind: 'hidden' } | { kind: 'note' } | { kind: '
 
 export type SlackTableRenderState = {
 	remainingTableChars: number;
-	hasNativeTable: boolean;
 	tableNumber: number;
 };
 
 export const createSlackTableRenderState = (): SlackTableRenderState => ({
 	remainingTableChars: SLACK_TABLE_MAX_TOTAL_CHARS,
-	hasNativeTable: false,
 	tableNumber: 0,
 });
 
@@ -168,20 +166,13 @@ export const createTextBlocks = (text: string, options: CreateTextBlocksOptions 
 	for (const segment of splitMarkdownSegments(renderedText)) {
 		if (segment.type === 'table') {
 			tableState.tableNumber++;
-			if (tableState.hasNativeTable) {
-				const notice = createHiddenTableNotice(truncation, tableState.tableNumber);
-				if (notice) {
-					blocks.push(notice);
-				}
-				continue;
-			}
-
 			const fittedTable = fitTableToSlackLimits(segment.headers, segment.rows, tableState.remainingTableChars);
 			tableState.remainingTableChars -= fittedTable.totalChars;
-			tableState.hasNativeTable = true;
 
 			if (fittedTable.headers.length > 0) {
-				blocks.push(Table({ headers: fittedTable.headers, rows: fittedTable.rows }));
+				blocks.push(
+					...renderMonospaceTable(fittedTable.headers, fittedTable.rows).map(createMonospaceTableBlock),
+				);
 			}
 
 			const truncationNotice = createTableTruncationNotice(
@@ -224,15 +215,7 @@ function createTableTruncationNotice(
 	return CardText(`_…${hiddenParts.join(' and ')}, open in nao_`, { style: 'muted' });
 }
 
-const HIDDEN_TABLE_NOTICE_INDENT = '\u00a0'.repeat(4);
 const HIDDEN_TABLE_NOTICE_PATTERN = /^\u00a0{4}\*\[ Table \d+ \]\*$/;
-
-function createHiddenTableNotice(truncation: TruncationNotice, tableNumber: number): CardChild | null {
-	if (truncation.kind === 'hidden') {
-		return null;
-	}
-	return CardText(`${HIDDEN_TABLE_NOTICE_INDENT}*[ Table ${tableNumber} ]*`, { style: 'muted' });
-}
 
 export function countHiddenTableNotices(children: CardChild[]): number {
 	return children.filter((child) => child.type === 'text' && HIDDEN_TABLE_NOTICE_PATTERN.test(child.content)).length;
@@ -259,10 +242,10 @@ function collectSlackCardNotificationContent(children: CardChild[]): {
 	let hasTable = false;
 	const text: string[] = [];
 	for (const child of children) {
-		if (child.type === 'text' && child.content.trim()) {
-			text.push(child.content.trim());
-		} else if (child.type === 'table') {
+		if (monospaceTableBlocks.has(child) || child.type === 'table') {
 			hasTable = true;
+		} else if (child.type === 'text' && child.content.trim()) {
+			text.push(child.content.trim());
 		} else if (child.type === 'section') {
 			const nested = collectSlackCardNotificationContent(child.children);
 			hasTable ||= nested.hasTable;
@@ -344,13 +327,70 @@ function fitRowToBudget(row: string[], characterBudget: number): string[] {
 	});
 }
 
+const SLACK_MONOSPACE_COLUMN_GAP = '  ';
+const monospaceTableBlocks = new WeakSet<CardChild>();
+
+function createMonospaceTableBlock(chunk: string): CardChild {
+	const block = CardText(chunk);
+	monospaceTableBlocks.add(block);
+	return block;
+}
+
+const SLACK_MONOSPACE_MAX_CHARS =
+	SLACK_SECTION_TEXT_MAX_CHARS - SLACK_CODE_FENCE_PREFIX.length - SLACK_CODE_FENCE_SUFFIX.length;
+
+/** Renders a table as fenced fixed-width text, split into Slack sections that each repeat the header. */
+function renderMonospaceTable(headers: string[], rows: string[][]): string[] {
+	const widths = headers.map((header, column) =>
+		Math.max(header.length, ...rows.map((row) => (row[column] ?? '').length)),
+	);
+	const formatLine = (cells: string[]): string =>
+		truncateSlackText(
+			widths
+				.map((width, column) => (cells[column] ?? '').padEnd(width))
+				.join(SLACK_MONOSPACE_COLUMN_GAP)
+				.trimEnd(),
+			SLACK_MONOSPACE_MAX_CHARS,
+		);
+	const heading = truncateSlackText(
+		`${formatLine(headers)}\n${formatLine(widths.map((width) => '-'.repeat(width)))}`,
+		SLACK_MONOSPACE_MAX_CHARS,
+	);
+
+	const chunks: string[] = [];
+	let current = '';
+	for (const line of rows.map(formatLine)) {
+		if (current && current.length + 1 + line.length <= SLACK_MONOSPACE_MAX_CHARS) {
+			current = `${current}\n${line}`;
+			continue;
+		}
+		if (current) {
+			chunks.push(current);
+		}
+		current = heading.length + 1 + line.length <= SLACK_MONOSPACE_MAX_CHARS ? `${heading}\n${line}` : line;
+	}
+	chunks.push(current || heading);
+	return chunks.map((chunk) => `${SLACK_CODE_FENCE_PREFIX}${chunk}${SLACK_CODE_FENCE_SUFFIX}`);
+}
+
+function renderMarkdownTablesAsMonospace(text: string): string {
+	return splitMarkdownSegments(text)
+		.map((segment) => {
+			if (segment.type !== 'table') {
+				return segment.text;
+			}
+			const fittedTable = fitTableToSlackLimits(segment.headers, segment.rows, SLACK_TABLE_MAX_TOTAL_CHARS);
+			return renderMonospaceTable(fittedTable.headers, fittedTable.rows).join('\n');
+		})
+		.join('\n');
+}
+
 export function buildSlackTableBlocks(text: string): ReturnType<typeof cardToBlockKit> | null {
 	const sanitized = stripAssistantTags(text);
-	const children = createTextBlocks(sanitized);
-	if (!children.some((child) => child.type === 'table')) {
+	if (!splitMarkdownSegments(sanitized).some((segment) => segment.type === 'table')) {
 		return null;
 	}
-	return cardToBlockKit(Card({ children }));
+	return cardToBlockKit(Card({ children: createTextBlocks(sanitized) }));
 }
 
 export const createNotificationCard = (text: string, buttons: { url: string; label: string }[]): CardElement =>
@@ -362,7 +402,7 @@ export const createNotificationCard = (text: string, buttons: { url: string; lab
 	});
 
 export function formatSlackMessageText(text: string): string {
-	const sanitized = stripAssistantTags(text);
+	const sanitized = renderMarkdownTablesAsMonospace(stripAssistantTags(text));
 	return mdToMrkdwn(sanitized) || sanitized;
 }
 

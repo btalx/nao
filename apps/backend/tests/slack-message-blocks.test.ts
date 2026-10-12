@@ -10,22 +10,46 @@ import {
 	createSlackTableRenderState,
 	createStopButtonCard,
 	createTextBlocks,
+	formatSlackMessageText,
 	isRecoverableSlackPayloadError,
 	SLACK_SECTION_TEXT_MAX_CHARS,
 } from '../src/utils/messaging-provider';
 
 type AnyBlock = { type: string; [key: string]: unknown };
 
-function tableChild(blocks: ReturnType<typeof createTextBlocks>) {
-	return blocks.find((block) => block.type === 'table') as
-		| { type: 'table'; headers: string[]; rows: string[][] }
-		| undefined;
-}
-
 function textContents(blocks: ReturnType<typeof createTextBlocks>): string[] {
 	return blocks
 		.filter((block): block is Extract<(typeof blocks)[number], { type: 'text' }> => block.type === 'text')
 		.map((block) => block.content);
+}
+
+function isMonospaceTableChunk(content: string): boolean {
+	return content.startsWith('```\n') && content.endsWith('\n```');
+}
+
+function parseMonospaceTableChunk(content: string): { headers: string[]; rows: string[][] } {
+	const lines = content.slice('```\n'.length, -'\n```'.length).split('\n');
+	const columns = [...lines[1].matchAll(/-+/g)].map((match) => match.index ?? 0);
+	const cells = (line: string) => columns.map((start, index) => line.slice(start, columns[index + 1]).trim());
+	return { headers: cells(lines[0]), rows: lines.slice(2).map(cells) };
+}
+
+function monospaceTableChunks(blocks: ReturnType<typeof createTextBlocks>) {
+	return textContents(blocks).filter(isMonospaceTableChunk).map(parseMonospaceTableChunk);
+}
+
+function monospaceTable(blocks: ReturnType<typeof createTextBlocks>) {
+	const chunks = monospaceTableChunks(blocks);
+	if (chunks.length === 0) {
+		return undefined;
+	}
+	return { headers: chunks[0].headers, rows: chunks.flatMap((chunk) => chunk.rows) };
+}
+
+function sectionTexts(blocks: AnyBlock[]): string[] {
+	return blocks
+		.filter((block) => block.type === 'section')
+		.map((block) => (block as { text?: { text: string } }).text?.text ?? '');
 }
 
 function reconstructChunkedText(chunks: string[]): string {
@@ -148,7 +172,7 @@ describe('createTextBlocks', () => {
 		expect(chunks.at(-1)?.endsWith('\n```')).toBe(true);
 	});
 
-	it('splits a markdown table into a Table element with text around it', () => {
+	it('renders a markdown table as fenced monospace text between the prose', () => {
 		const text = [
 			'Here is your table:',
 			'',
@@ -162,24 +186,25 @@ describe('createTextBlocks', () => {
 
 		const blocks = createTextBlocks(text);
 
-		expect(blocks.map((block) => block.type)).toEqual(['text', 'table', 'text']);
-		expect(tableChild(blocks)).toEqual({
-			type: 'table',
-			headers: ['Column A', 'Column B'],
-			rows: [
-				['Hello', 'World'],
-				['Foo', 'Bar'],
-			],
-		});
+		expect(blocks.map((block) => block.type)).toEqual(['text', 'text', 'text']);
 		expect(blocks[0]).toMatchObject({ content: 'Here is your table:' });
+		expect(blocks[1]).toMatchObject({
+			content: [
+				'```',
+				'Column A  Column B',
+				'--------  --------',
+				'Hello     World',
+				'Foo       Bar',
+				'```',
+			].join('\n'),
+		});
 		expect(blocks[2]).toMatchObject({ content: 'Let me know!' });
+		expect(blocks.some((block) => block.type === 'table')).toBe(false);
 	});
 
 	it('handles tables without outer pipes and alignment markers', () => {
 		const text = ['Revenue | Region', ':---|---:', 'Hello | World'].join('\n');
-		const table = tableChild(createTextBlocks(text));
-		expect(table).toEqual({
-			type: 'table',
+		expect(monospaceTable(createTextBlocks(text))).toEqual({
 			headers: ['Revenue', 'Region'],
 			rows: [['Hello', 'World']],
 		});
@@ -187,25 +212,22 @@ describe('createTextBlocks', () => {
 
 	it('strips inline markdown and links inside table cells', () => {
 		const text = ['| Name | Link |', '|------|------|', '| **Bob** | [docs](https://x.dev) |'].join('\n');
-		const table = tableChild(createTextBlocks(text));
-		expect(table?.rows).toEqual([['Bob', 'docs']]);
+		expect(monospaceTable(createTextBlocks(text))?.rows).toEqual([['Bob', 'docs']]);
 	});
 
 	it('pads and truncates rows to match the header column count', () => {
 		const text = ['| A | B | C |', '|---|---|---|', '| 1 | 2 |', '| 1 | 2 | 3 | 4 |'].join('\n');
-		const table = tableChild(createTextBlocks(text));
-		expect(table?.rows).toEqual([
+		expect(monospaceTable(createTextBlocks(text))?.rows).toEqual([
 			['1', '2', '-'],
 			['1', '2', '3'],
 		]);
 	});
 
-	it('never sends an empty cell to Slack', () => {
+	it('shows blank cells as a placeholder so columns stay readable', () => {
 		const text = ['| region | count | note |', '|---|---|---|', '| EU | 3 |', '| US |  | x |', '| | | |'].join(
 			'\n',
 		);
-		const table = tableChild(createTextBlocks(text));
-		expect(table?.rows).toEqual([
+		expect(monospaceTable(createTextBlocks(text))?.rows).toEqual([
 			['EU', '3', '-'],
 			['US', '-', 'x'],
 			['-', '-', '-'],
@@ -213,12 +235,12 @@ describe('createTextBlocks', () => {
 	});
 
 	it('fills empty header cells', () => {
-		const table = tableChild(createTextBlocks(['| name |  |', '|---|---|', '| a | b |'].join('\n')));
+		const table = monospaceTable(createTextBlocks(['| name |  |', '|---|---|', '| a | b |'].join('\n')));
 		expect(table?.headers).toEqual(['name', '-']);
 	});
 
 	it('fills the missing cell of a row that is still streaming', () => {
-		const table = tableChild(createTextBlocks(['| id | name |', '|---|---|', '| 1'].join('\n')));
+		const table = monospaceTable(createTextBlocks(['| id | name |', '|---|---|', '| 1'].join('\n')));
 		expect(table?.rows).toEqual([['1', '-']]);
 	});
 
@@ -226,39 +248,35 @@ describe('createTextBlocks', () => {
 		const text = ['```', '| A | B |', '|---|---|', '| 1 | 2 |', '```'].join('\n');
 		const blocks = createTextBlocks(text);
 		expect(blocks.map((block) => block.type)).toEqual(['text']);
-		expect(tableChild(blocks)).toBeUndefined();
+		expect(textContents(blocks)[0]).toContain('| A | B |');
 	});
 
 	it('keeps a mismatched fence marker as literal content inside a code block', () => {
 		const text = ['```', '~~~', '| A | B |', '|---|---|', '| 1 | 2 |', '```'].join('\n');
 		const blocks = createTextBlocks(text);
 		expect(blocks.map((block) => block.type)).toEqual(['text']);
-		expect(tableChild(blocks)).toBeUndefined();
+		expect(textContents(blocks)[0]).toContain('| A | B |');
 	});
 
 	it('parses a real table that follows a closed code block', () => {
 		const text = ['```', 'code', '```', '', '| A | B |', '|---|---|', '| 1 | 2 |'].join('\n');
-		const table = tableChild(createTextBlocks(text));
-		expect(table).toEqual({
-			type: 'table',
-			headers: ['A', 'B'],
-			rows: [['1', '2']],
-		});
+		const blocks = createTextBlocks(text);
+		expect(monospaceTable(blocks.slice(1))).toEqual({ headers: ['A', 'B'], rows: [['1', '2']] });
 	});
 
-	it('clamps an oversized cell so it cannot blow Slack table limits', () => {
+	it('clamps an oversized cell', () => {
 		const long = 'x'.repeat(500);
 		const text = ['| Name | Value |', '|------|-------|', `| row | ${long} |`].join('\n');
-		const cell = tableChild(createTextBlocks(text))?.rows[0][1] ?? '';
+		const cell = monospaceTable(createTextBlocks(text))?.rows[0][1] ?? '';
 		expect(cell.length).toBe(300);
 		expect(cell.endsWith('…')).toBe(true);
 	});
 
-	it("caps table data at 99 rows so Slack's header-inclusive total stays at 100", () => {
+	it('caps table data at 99 rows and notes the rest', () => {
 		const rows = Array.from({ length: 150 }, (_, i) => `| ${i} |`);
 		const blocks = createTextBlocks(['| N |', '|---|', ...rows].join('\n'));
-		expect(tableChild(blocks)?.rows).toHaveLength(99);
-		expect(blocks[1]).toMatchObject({
+		expect(monospaceTable(blocks)?.rows).toHaveLength(99);
+		expect(blocks.at(-1)).toMatchObject({
 			type: 'text',
 			content: '_…51 more rows, open in nao_',
 			style: 'muted',
@@ -269,16 +287,9 @@ describe('createTextBlocks', () => {
 		const cell = 'y'.repeat(200);
 		const rows = Array.from({ length: 60 }, () => `| ${cell} | ${cell} |`);
 		const blocks = createTextBlocks(['| A | B |', '|---|---|', ...rows].join('\n'));
-		const table = tableChild(blocks);
+		const table = monospaceTable(blocks);
 		expect(table).toBeDefined();
 		expect(table!.rows.length).toBeLessThan(60);
-
-		const budget = table!.rows.reduce(
-			(sum, row) => sum + row.reduce((rowSum, value) => rowSum + Math.max(value.length, 1), 0),
-			table!.headers.reduce((sum, value) => sum + Math.max(value.length, 1), 0),
-		);
-		expect(budget).toBeLessThanOrEqual(9000);
-
 		expect(blocks.some((block) => block.type === 'text' && String(block.content).includes('more rows'))).toBe(true);
 		expect(blocks.some((block) => block.type === 'actions')).toBe(false);
 	});
@@ -294,72 +305,76 @@ describe('createTextBlocks', () => {
 			].join('\n'),
 		);
 
-		expect(tableChild(blocks)?.headers).toHaveLength(20);
-		expect(blocks[1]).toMatchObject({
+		expect(monospaceTable(blocks)?.headers).toHaveLength(20);
+		expect(blocks.at(-1)).toMatchObject({
 			type: 'text',
 			content: '_…5 more columns, open in nao_',
 			style: 'muted',
 		});
 	});
 
-	it('hides notices for a truncated first table and an additional table when requested', () => {
+	it('splits a long table into Slack-safe sections that each repeat the header', () => {
+		const rows = Array.from({ length: 99 }, (_, index) => `| row-${index} | ${'v'.repeat(80)} |`);
+		const blocks = createTextBlocks(['| Name | Value |', '|---|---|', ...rows].join('\n'));
+		const chunks = textContents(blocks).filter(isMonospaceTableChunk);
+
+		expect(chunks.length).toBeGreaterThan(1);
+		expect(chunks.every((chunk) => chunk.length <= SLACK_SECTION_TEXT_MAX_CHARS)).toBe(true);
+		expect(chunks.every((chunk) => chunk.startsWith('```\nName'))).toBe(true);
+		expect(monospaceTable(blocks)?.rows).toHaveLength(99);
+	});
+
+	it('keeps a row wider than a Slack section within the section limit', () => {
+		const headers = Array.from({ length: 20 }, (_, index) => `c${index}`);
+		const row = Array.from({ length: 20 }, () => 'w'.repeat(290));
+		const blocks = createTextBlocks(
+			[
+				`| ${headers.join(' | ')} |`,
+				`| ${headers.map(() => '---').join(' | ')} |`,
+				`| ${row.join(' | ')} |`,
+			].join('\n'),
+		);
+		const chunks = textContents(blocks).filter(isMonospaceTableChunk);
+
+		expect(chunks.length).toBeGreaterThan(0);
+		expect(chunks.every((chunk) => chunk.length <= SLACK_SECTION_TEXT_MAX_CHARS)).toBe(true);
+	});
+
+	it('hides truncation notices when requested', () => {
 		const rows = Array.from({ length: 150 }, (_, index) => `| ${index} |`);
 		const blocks = createTextBlocks(
 			['| N |', '|---|', ...rows, '', '| Another |', '|---|', '| value |'].join('\n'),
-			{
-				truncation: { kind: 'hidden' },
-			},
+			{ truncation: { kind: 'hidden' } },
 		);
 
-		expect(blocks.map((block) => block.type)).toEqual(['table']);
+		expect(textContents(blocks).every(isMonospaceTableChunk)).toBe(true);
+		expect(monospaceTableChunks(blocks).map((chunk) => chunk.headers)).toEqual([['N'], ['Another']]);
 	});
 
-	it('renders only the first table and notes that another table is omitted', () => {
-		const cell = 'z'.repeat(200);
-		const firstRows = Array.from({ length: 15 }, () => `| ${cell} | ${cell} |`);
-		const secondRows = Array.from({ length: 30 }, () => `| ${cell} | ${cell} |`);
-		const text = [
-			'| First | Value |',
-			'|---|---|',
-			...firstRows,
-			'',
-			'Between tables',
-			'',
-			'| Second | Value |',
-			'|---|---|',
-			...secondRows,
-		].join('\n');
-
-		const blocks = createTextBlocks(text);
-		const tables = blocks.filter((block) => block.type === 'table');
-
-		expect(tables).toHaveLength(1);
-		expect(tables[0].rows).toHaveLength(15);
-		expect(blocks.map((block) => block.type)).toEqual(['table', 'text', 'text']);
-		expect(blocks[2]).toMatchObject({
-			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 2 ]*',
-			style: 'muted',
-		});
-	});
-
-	it('does not inspect a later table before replacing it with a note', () => {
-		const oversizedHeaders = Array.from({ length: 20 }, (_, index) => `${index}-${'x'.repeat(300)}`);
+	it('renders every table inline instead of replacing later tables with placeholders', () => {
 		const blocks = createTextBlocks(
 			[
 				'| First |',
 				'|---|',
 				'| value |',
 				'',
-				`| ${oversizedHeaders.join(' | ')} |`,
-				`| ${oversizedHeaders.map(() => '---').join(' | ')} |`,
+				'Between the tables.',
+				'',
+				'| Second |',
+				'|---|',
+				'| value |',
+				'',
+				'| Third |',
+				'|---|',
+				'| value |',
 			].join('\n'),
+			{ truncation: { kind: 'link', url: 'https://nao.example/chats/chat-123' } },
 		);
 
-		expect(blocks.map((block) => block.type)).toEqual(['table', 'text']);
-		expect(blocks[1]).toMatchObject({
-			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 2 ]*',
-			style: 'muted',
-		});
+		expect(monospaceTableChunks(blocks).map((chunk) => chunk.headers)).toEqual([['First'], ['Second'], ['Third']]);
+		expect(blocks[1]).toMatchObject({ content: 'Between the tables.' });
+		expect(countHiddenTableNotices(blocks)).toBe(0);
+		expect(blocks.some((block) => block.type === 'actions')).toBe(false);
 	});
 
 	it('adds a linked action immediately after a truncated table and before trailing prose', () => {
@@ -379,236 +394,60 @@ describe('createTextBlocks', () => {
 			].join('\n'),
 			{ truncation: { kind: 'link', url } },
 		);
-		const table = tableChild(blocks);
-		const actions = blocks.filter((block) => block.type === 'actions');
+		const table = monospaceTable(blocks);
+		const actionsIndex = blocks.findIndex((block) => block.type === 'actions');
 
-		expect(blocks.map((block) => block.type)).toEqual(['text', 'table', 'actions', 'text']);
-		expect(blocks[3]).toMatchObject({ content: 'Additional commentary after the table.' });
+		expect(blocks[0]).toMatchObject({ content: 'Here are the results.' });
+		expect(blocks.at(-1)).toMatchObject({ content: 'Additional commentary after the table.' });
+		expect(actionsIndex).toBe(blocks.length - 2);
+		expect(blocks.filter((block) => block.type === 'actions')).toHaveLength(1);
+		expect(blocks[actionsIndex]).toMatchObject({
+			type: 'actions',
+			children: [{ type: 'link-button', url, label: 'Open in nao to see full table' }],
+		});
 		expect(table?.headers).toHaveLength(20);
-		expect(table?.rows[0]).toHaveLength(20);
 		expect(table?.rows).toHaveLength(99);
-		expect(actions).toHaveLength(1);
-		expect(actions[0]).toMatchObject({
-			type: 'actions',
-			children: [
-				{
-					type: 'link-button',
-					url,
-					label: 'Open in nao to see full table',
-				},
-			],
-		});
-	});
-
-	it('uses one truncation button and a placeholder for an omitted second table', () => {
-		const url = 'https://nao.example/chats/chat-123';
-		const firstHeaders = Array.from({ length: 21 }, (_, index) => `Column ${index + 1}`);
-		const firstRow = Array.from({ length: 21 }, (_, index) => String(index + 1));
-		const secondRows = Array.from({ length: 101 }, (_, index) => `| ${index + 1} |`);
-		const blocks = createTextBlocks(
-			[
-				`| ${firstHeaders.join(' | ')} |`,
-				`| ${firstHeaders.map(() => '---').join(' | ')} |`,
-				`| ${firstRow.join(' | ')} |`,
-				'',
-				'| Value |',
-				'|---|',
-				...secondRows,
-			].join('\n'),
-			{ truncation: { kind: 'link', url } },
-		);
-		const actions = blocks.filter((block) => block.type === 'actions');
-
-		expect(blocks.map((block) => block.type)).toEqual(['table', 'actions', 'text']);
-		expect(blocks.filter((block) => block.type === 'table')).toHaveLength(1);
-		expect(actions).toHaveLength(1);
-		expect(actions[0]).toMatchObject({
-			type: 'actions',
-			children: [{ type: 'link-button', url, label: 'Open in nao to see full table', style: undefined }],
-		});
-		expect(blocks[2]).toMatchObject({
-			type: 'text',
-			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 2 ]*',
-			style: 'muted',
-		});
-	});
-
-	it('keeps consecutive omitted tables as separately numbered placeholders', () => {
-		const url = 'https://nao.example/chats/chat-123';
-		const blocks = createTextBlocks(
-			[
-				'| First |',
-				'|---|',
-				'| value |',
-				'',
-				'| Second |',
-				'|---|',
-				'| value |',
-				'',
-				'| Third |',
-				'|---|',
-				'| value |',
-			].join('\n'),
-			{ truncation: { kind: 'link', url } },
-		);
-
-		expect(blocks.map((block) => block.type)).toEqual(['table', 'text', 'text']);
-		expect(blocks[1]).toMatchObject({
-			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 2 ]*',
-			style: 'muted',
-		});
-		expect(blocks[2]).toMatchObject({
-			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 3 ]*',
-			style: 'muted',
-		});
-	});
-
-	it('keeps numbered placeholders in position around prose', () => {
-		const url = 'https://nao.example/chats/chat-123';
-		const blocks = createTextBlocks(
-			[
-				'| First |',
-				'|---|',
-				'| value |',
-				'',
-				'| Second |',
-				'|---|',
-				'| value |',
-				'',
-				'Between the additional tables.',
-				'',
-				'| Third |',
-				'|---|',
-				'| value |',
-			].join('\n'),
-			{ truncation: { kind: 'link', url } },
-		);
-
-		expect(blocks.map((block) => block.type)).toEqual(['table', 'text', 'text', 'text']);
-		expect(blocks[1]).toMatchObject({
-			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 2 ]*',
-			style: 'muted',
-		});
-		expect(blocks[2]).toMatchObject({ content: 'Between the additional tables.' });
-		expect(blocks[3]).toMatchObject({
-			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 3 ]*',
-			style: 'muted',
-		});
-	});
-
-	it('shares native table selection and hidden table counting across calls', () => {
-		const tableState = createSlackTableRenderState();
-		const firstBlocks = createTextBlocks('| First |\n|---|\n| value |', { tableState });
-		const secondBlocks = createTextBlocks('| Second |\n|---|\n| value |', { tableState });
-
-		expect(firstBlocks.map((block) => block.type)).toEqual(['table']);
-		expect(secondBlocks.map((block) => block.type)).toEqual(['text']);
-		expect(secondBlocks[0]).toMatchObject({
-			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 2 ]*',
-			style: 'muted',
-		});
-		expect(countHiddenTableNotices([...firstBlocks, ...secondBlocks])).toBe(1);
-	});
-
-	it('restores a table-only hidden run when rendering the final message', () => {
-		const firstTable = '| First |\n|---|\n| value |';
-		const secondTable = '| Second |\n|---|\n| value |';
-		const streamingTableState = createSlackTableRenderState();
-
-		createTextBlocks(firstTable, {
-			truncation: { kind: 'hidden' },
-			tableState: streamingTableState,
-		});
-		const streamingBlocks = createTextBlocks(secondTable, {
-			truncation: { kind: 'hidden' },
-			tableState: streamingTableState,
-		});
-
-		expect(streamingBlocks).toEqual([]);
-		expect(streamingTableState.tableNumber).toBe(2);
-
-		const finalTableState = createSlackTableRenderState();
-		const finalBlocks = [
-			...createTextBlocks(firstTable, {
-				truncation: { kind: 'link', url: 'https://nao.example' },
-				tableState: finalTableState,
-			}),
-			...createTextBlocks(secondTable, {
-				truncation: { kind: 'link', url: 'https://nao.example' },
-				tableState: finalTableState,
-			}),
-		];
-
-		expect(finalBlocks.map((block) => block.type)).toEqual(['table', 'text']);
-		expect(finalBlocks[1]).toMatchObject({
-			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 2 ]*',
-			style: 'muted',
-		});
-		expect(countHiddenTableNotices(finalBlocks)).toBe(1);
-	});
-
-	it('continues hidden table numbering across calls', () => {
-		const tableState = createSlackTableRenderState();
-		createTextBlocks('| First |\n|---|\n| value |', { tableState });
-		const secondBlocks = createTextBlocks('| Second |\n|---|\n| value |', { tableState });
-		const thirdBlocks = createTextBlocks('| Third |\n|---|\n| value |', { tableState });
-
-		expect(secondBlocks[0]).toMatchObject({
-			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 2 ]*',
-		});
-		expect(thirdBlocks[0]).toMatchObject({
-			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 3 ]*',
-		});
 	});
 
 	it('shares the table character budget across calls', () => {
 		const tableState = createSlackTableRenderState();
 		const cell = 'x'.repeat(80);
 		const rows = Array.from({ length: 50 }, () => `| ${cell} | ${cell} |`);
-		const firstBlocks = createTextBlocks(['| A | B |', '|---|---|', ...rows].join('\n'), { tableState });
+		createTextBlocks(['| A | B |', '|---|---|', ...rows].join('\n'), { tableState });
+		const afterFirst = tableState.remainingTableChars;
 		const secondBlocks = createTextBlocks('| Second |\n|---|\n| value |', { tableState });
 
-		expect(tableState.remainingTableChars).toBeLessThan(1000);
-		expect(firstBlocks.filter((block) => block.type === 'table')).toHaveLength(1);
-		expect(secondBlocks.filter((block) => block.type === 'table')).toHaveLength(0);
-		expect(secondBlocks[0]).toMatchObject({
-			content: '\u00a0\u00a0\u00a0\u00a0*[ Table 2 ]*',
-		});
+		expect(afterFirst).toBeLessThan(1000);
+		expect(tableState.remainingTableChars).toBeLessThan(afterFirst);
+		expect(tableState.tableNumber).toBe(2);
+		expect(monospaceTable(secondBlocks)).toEqual({ headers: ['Second'], rows: [['value']] });
+	});
+
+	it('notes a table that no longer fits the remaining budget', () => {
+		const tableState = { ...createSlackTableRenderState(), remainingTableChars: 0 };
+		const blocks = createTextBlocks('| Name |\n|---|\n| value |', { tableState });
+
+		expect(blocks).toEqual([
+			expect.objectContaining({ type: 'text', content: '_…1 more row and 1 more column, open in nao_' }),
+		]);
 	});
 
 	it('uses independent table state when none is provided', () => {
-		const firstBlocks = createTextBlocks('| First |\n|---|\n| value |');
-		const secondBlocks = createTextBlocks('| Second |\n|---|\n| value |');
-
-		expect(firstBlocks.filter((block) => block.type === 'table')).toHaveLength(1);
-		expect(secondBlocks.filter((block) => block.type === 'table')).toHaveLength(1);
+		expect(monospaceTable(createTextBlocks('| First |\n|---|\n| value |'))).toBeDefined();
+		expect(monospaceTable(createTextBlocks('| Second |\n|---|\n| value |'))).toBeDefined();
 	});
 });
 
 describe('countHiddenTableNotices', () => {
-	it('counts omitted table placeholders in rendered children', () => {
-		const children = createTextBlocks(
-			[
-				'| First |',
-				'|---|',
-				'| value |',
-				'',
-				'| Second |',
-				'|---|',
-				'| value |',
-				'',
-				'| Third |',
-				'|---|',
-				'| value |',
-			].join('\n'),
-		);
-
-		expect(countHiddenTableNotices(children)).toBe(2);
-	});
-
-	it('returns zero when no tables are omitted', () => {
+	it('returns zero because every table renders inline', () => {
 		expect(countHiddenTableNotices(createTextBlocks('No omitted tables.'))).toBe(0);
-		expect(countHiddenTableNotices(createTextBlocks('| Only | table |\n|---|---|\n| one | value |'))).toBe(0);
+		expect(
+			countHiddenTableNotices(
+				createTextBlocks(
+					['| First |', '|---|', '| value |', '', '| Second |', '|---|', '| value |'].join('\n'),
+				),
+			),
+		).toBe(0);
 	});
 });
 
@@ -768,60 +607,18 @@ describe('buildSlackTableBlocks', () => {
 		expect(buildSlackTableBlocks('No tables here, just text.')).toBeNull();
 	});
 
-	it('builds an official Slack table block from a markdown table', () => {
+	it('builds monospace section blocks instead of a native table block', () => {
 		const text = ['| Column A | Column B |', '|----------|----------|', '| Hello | World |', '| Foo | Bar |'].join(
 			'\n',
 		);
 
 		const blocks = buildSlackTableBlocks(text) as AnyBlock[] | null;
 		expect(blocks).not.toBeNull();
+		expect(blocks!.some((block) => block.type === 'data_table' || block.type === 'table')).toBe(false);
 
-		const tableBlock = blocks!.find((block) => block.type === 'data_table') as
-			| { type: 'data_table'; rows: { type: string; text: string }[][] }
-			| undefined;
-		expect(tableBlock).toBeDefined();
-		expect(tableBlock!.rows).toEqual([
-			[
-				{ type: 'raw_text', text: 'Column A' },
-				{ type: 'raw_text', text: 'Column B' },
-			],
-			[
-				{ type: 'raw_text', text: 'Hello' },
-				{ type: 'raw_text', text: 'World' },
-			],
-			[
-				{ type: 'raw_text', text: 'Foo' },
-				{ type: 'raw_text', text: 'Bar' },
-			],
-		]);
-	});
-
-	it('renders every table cell with non-empty text, as Slack requires', () => {
-		const text = ['| region | count | note |', '|---|---|---|', '| EU | 3 |', '| US |  | x |'].join('\n');
-		const blocks = buildSlackTableBlocks(text) as AnyBlock[] | null;
-		const tableBlock = blocks?.find((block) => block.type === 'data_table') as
-			| { rows: { type: string; text: string }[][] }
-			| undefined;
-		const cells = tableBlock?.rows.flat() ?? [];
-		expect(cells.length).toBe(9);
-		expect(cells.every((cell) => cell.text.trim().length > 0)).toBe(true);
-	});
-
-	it("keeps the rendered table block within Slack's 10,000-character budget", () => {
-		const bigRows = Array.from({ length: 200 }, (_, i) => `| item ${i} | ${'x'.repeat(120)} |`);
-		const text = ['| Name | Description |', '|------|-------------|', ...bigRows].join('\n');
-
-		const blocks = buildSlackTableBlocks(text) as AnyBlock[] | null;
-		const tableBlock = blocks?.find((block) => block.type === 'data_table') as
-			| { rows: { type: string; text: string }[][] }
-			| undefined;
-		expect(tableBlock).toBeDefined();
-
-		const totalChars = tableBlock!.rows.reduce(
-			(sum, row) => sum + row.reduce((rowSum, cell) => rowSum + cell.text.length, 0),
-			0,
-		);
-		expect(totalChars).toBeLessThanOrEqual(10_000);
+		const sectionText = sectionTexts(blocks!).join('\n');
+		expect(sectionText).toContain('Column A  Column B');
+		expect(sectionText).toContain('Foo       Bar');
 	});
 
 	it('keeps every rendered section within Slack limits when a message has two tables', () => {
@@ -830,13 +627,21 @@ describe('buildSlackTableBlocks', () => {
 		const text = [...firstTable, '', '| Second | Description |', '|---|---|', ...secondRows].join('\n');
 
 		const blocks = buildSlackTableBlocks(text) as AnyBlock[] | null;
-		const tableBlocks = blocks?.filter((block) => block.type === 'data_table') ?? [];
-		const sectionBlocks = (blocks?.filter((block) => block.type === 'section') ?? []) as {
-			type: 'section';
-			text?: { text: string };
-		}[];
+		const sections = sectionTexts(blocks ?? []);
 
-		expect(tableBlocks).toHaveLength(1);
-		expect(sectionBlocks.every((block) => (block.text?.text.length ?? 0) <= 3000)).toBe(true);
+		expect(sections.some((section) => section.includes('First'))).toBe(true);
+		expect(sections.some((section) => section.includes('row-39'))).toBe(true);
+		expect(sections.every((section) => section.length <= 3000)).toBe(true);
+	});
+});
+
+describe('formatSlackMessageText', () => {
+	it('renders tables as monospace in the plain-text fallback', () => {
+		const text = formatSlackMessageText(
+			['Totals:', '', '| Region | Count |', '|---|---|', '| EU | 3 |'].join('\n'),
+		);
+
+		expect(text).toContain('```\nRegion  Count\n------  -----\nEU      3\n```');
+		expect(text).not.toContain('| Region |');
 	});
 });
